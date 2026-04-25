@@ -1,49 +1,29 @@
 // Text-to-speech for spoken facilitator interventions.
-// Uses Google TTS if API key is available, falls back to Web Speech API.
+// Uses the server-side Deepgram route when available, falls back to Web Speech.
 
 export async function speak(text: string, voice?: string): Promise<void> {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_TTS_API_KEY;
-
-  if (apiKey) {
-    await speakWithGoogleTTS(text, apiKey, voice);
-  } else {
-    speakWithWebSpeech(text);
-  }
+  const played = await speakWithDeepgram(text, voice);
+  if (!played) speakWithWebSpeech(text);
 }
 
-async function speakWithGoogleTTS(text: string, apiKey: string, voice?: string): Promise<void> {
-  const res = await fetch(
-    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: { text },
-        voice: {
-          languageCode: "en-US",
-          name: voice || "en-US-Neural2-F",
-          ssmlGender: "FEMALE",
-        },
-        audioConfig: { audioEncoding: "MP3", speakingRate: 0.95, pitch: -1 },
-      }),
-    }
-  );
+async function speakWithDeepgram(text: string, voice?: string): Promise<boolean> {
+  const res = await fetch("/api/speak", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, voice }),
+  }).catch(() => null);
 
-  if (!res.ok) {
-    speakWithWebSpeech(text);
-    return;
-  }
+  if (!res?.ok) return false;
 
-  const data = await res.json();
-  const audioContent = data.audioContent;
-  const audioBlob = new Blob(
-    [Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0))],
-    { type: "audio/mp3" }
-  );
+  const audioBlob = await res.blob();
   const url = URL.createObjectURL(audioBlob);
   const audio = new Audio(url);
-  await audio.play();
+  await audio.play().catch(() => {
+    URL.revokeObjectURL(url);
+    throw new Error("Audio playback failed");
+  });
   audio.onended = () => URL.revokeObjectURL(url);
+  return true;
 }
 
 function speakWithWebSpeech(text: string): void {

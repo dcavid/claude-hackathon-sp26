@@ -2,29 +2,36 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Users, Calendar, Clock, Heart, ArrowRight, Sparkles, CheckCircle2 } from "lucide-react";
 import { DEMO_POD } from "@/lib/demo/seedData";
-import { Suspense } from "react";
 
 function MatchContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
-  const [themes, setThemes] = useState<string[]>([]);
+
+  const themesParam = searchParams.get("themes");
+  let themes = DEMO_POD.sharedThemes;
+
+  if (themesParam) {
+    try {
+      const parsed = JSON.parse(themesParam);
+      if (Array.isArray(parsed) && parsed.every((value) => typeof value === "string")) {
+        themes = parsed;
+      }
+    } catch {
+      themes = DEMO_POD.sharedThemes;
+    }
+  }
 
   useEffect(() => {
-    const t = searchParams.get("themes");
-    if (t) {
-      try { setThemes(JSON.parse(t)); } catch { setThemes(DEMO_POD.sharedThemes); }
-    } else {
-      setThemes(DEMO_POD.sharedThemes);
-    }
     const timer = setTimeout(() => setLoading(false), 1800);
     return () => clearTimeout(timer);
-  }, [searchParams]);
+  }, []);
 
   if (loading) {
     return (
@@ -33,7 +40,7 @@ function MatchContent() {
           <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-6">
             <Sparkles className="w-7 h-7 text-primary animate-pulse" />
           </div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">Finding your circle...</h2>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Building your pod...</h2>
           <p className="text-muted-foreground text-sm">Matching themes and support style</p>
           <div className="flex gap-1.5 justify-center mt-6">
             {[0, 1, 2].map((i) => (
@@ -65,11 +72,11 @@ function MatchContent() {
         <div className="text-center mb-10">
           <div className="flex items-center justify-center gap-2 mb-3">
             <CheckCircle2 className="w-5 h-5 text-green-600" />
-            <span className="text-sm font-medium text-green-700">Circle found</span>
+            <span className="text-sm font-medium text-green-700">Pod found</span>
           </div>
           <h1 className="text-3xl font-bold text-foreground mb-3">You have a match</h1>
           <p className="text-muted-foreground">
-            Based on your reflection, we found a circle where you&apos;ll feel at home.
+            Based on your intake, we found a therapist-led pod where the conversation should feel relevant, structured, and safe.
           </p>
         </div>
 
@@ -89,9 +96,14 @@ function MatchContent() {
 
             {/* Stats row */}
             <div className="grid grid-cols-3 gap-4 mb-6">
-              <StatItem icon={<Users className="w-4 h-4" />} label="Members" value={`${DEMO_POD.memberCount} people`} />
+              <StatItem icon={<Users className="w-4 h-4" />} label="Members" value={`${DEMO_POD.memberCount} members`} />
               <StatItem icon={<Calendar className="w-4 h-4" />} label="Format" value={DEMO_POD.meetingType} />
               <StatItem icon={<Clock className="w-4 h-4" />} label="Next session" value={DEMO_POD.nextSession} />
+            </div>
+
+            <div className="mb-6 rounded-xl border border-border/70 bg-card p-4">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Between sessions</p>
+              <p className="text-sm text-muted-foreground">{DEMO_POD.chatDescription}</p>
             </div>
 
             {/* Shared themes */}
@@ -111,7 +123,7 @@ function MatchContent() {
         {/* Members preview */}
         <Card className="mb-8">
           <CardContent className="p-6">
-            <p className="text-sm font-medium text-muted-foreground mb-4">Who&apos;s in this circle</p>
+              <p className="text-sm font-medium text-muted-foreground mb-4">Who&apos;s in this pod</p>
             <div className="flex items-center gap-3">
               {["David", "Maya", "Jordan", "Priya"].map((name) => (
                 <div key={name} className="flex flex-col items-center gap-1.5">
@@ -135,11 +147,11 @@ function MatchContent() {
           className="w-full gap-2 text-base py-6"
           onClick={() => router.push("/session")}
         >
-          Enter Circle
+          Enter Pod Workspace
           <ArrowRight className="w-4 h-4" />
         </Button>
         <p className="text-center text-xs text-muted-foreground mt-3">
-          Session begins when all members check in
+          Your private pod chat and weekly session workspace open next
         </p>
       </div>
     </div>

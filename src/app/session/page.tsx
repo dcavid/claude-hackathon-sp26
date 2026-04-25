@@ -7,49 +7,54 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
-  Heart, Mic, Square, Sparkles, Shield,
-  LogOut, Send, AlertCircle, Volume2, VolumeX,
+  Heart, Mic, Square, Sparkles, Shield, LogOut, Send, AlertCircle, ClipboardList, Users,
 } from "lucide-react";
-import { DEMO_PARTICIPANTS } from "@/lib/demo/seedData";
-import { speak } from "@/lib/voice/textToSpeech";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+import { DEMO_PARTICIPANTS, DEMO_POD, DEMO_THERAPIST } from "@/lib/demo/seedData";
 
 type Message = {
   id: string;
   participantId: string;
   participantName: string;
+  role: "member" | "therapist";
   text: string;
   timestamp: string;
   reactions: Record<string, number>;
-  isAI?: boolean;
-  isSafety?: boolean;
 };
 
 type Phase = "waiting" | "checkin" | "live" | "ended";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+type CopilotRecommendation = {
+  prompt: string;
+  rationale: string;
+  quietParticipants: string[];
+  dominantSpeaker?: string | null;
+};
+
+type SafetyRecommendation = {
+  riskLevel: "low" | "medium" | "high";
+  response: string;
+  resources: string[];
+};
 
 const REACTIONS = ["I relate", "I hear you", "Thank you for sharing"];
 
 const PARTICIPANT_COLORS: Record<string, string> = {
-  david:  "bg-blue-100 text-blue-700",
-  maya:   "bg-purple-100 text-purple-700",
+  david: "bg-blue-100 text-blue-700",
+  maya: "bg-purple-100 text-purple-700",
   jordan: "bg-amber-100 text-amber-700",
-  priya:  "bg-rose-100 text-rose-700",
-  alex:   "bg-teal-100 text-teal-700",
+  priya: "bg-rose-100 text-rose-700",
+  alex: "bg-teal-100 text-teal-700",
+  therapist: "bg-slate-200 text-slate-800",
 };
 
 const SESSION_THEME =
   typeof window !== "undefined"
-    ? sessionStorage.getItem("resonance_theme") || "imposter syndrome and self-worth"
-    : "imposter syndrome and self-worth";
+    ? sessionStorage.getItem("resonance_theme") || "burnout, loneliness, and life transitions"
+    : "burnout, loneliness, and life transitions";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-// ─── Component ───────────────────────────────────────────────────────────────
 
 export default function SessionPage() {
   const router = useRouter();
@@ -58,9 +63,9 @@ export default function SessionPage() {
   const [typingBot, setTypingBot] = useState<string | null>(null);
   const [typedMessage, setTypedMessage] = useState("");
   const [isRecording, setIsRecording] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [safetyActive, setSafetyActive] = useState(false);
-  const [facilitatorLoading, setFacilitatorLoading] = useState(false);
+  const [copilotLoading, setCopilotLoading] = useState(false);
+  const [copilotSuggestion, setCopilotSuggestion] = useState<CopilotRecommendation | null>(null);
+  const [safetyRecommendation, setSafetyRecommendation] = useState<SafetyRecommendation | null>(null);
   const [userMessageCount, setUserMessageCount] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -68,8 +73,9 @@ export default function SessionPage() {
   const messagesRef = useRef<Message[]>([]);
   const abortRef = useRef(false);
 
-  // Keep messagesRef in sync so async callbacks don't use stale state
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -77,45 +83,33 @@ export default function SessionPage() {
     }
   }, [messages, typingBot]);
 
-  // ─── Message helpers ───────────────────────────────────────────────────────
-
   const pushMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg]);
   }, []);
 
-  const addAIMessage = useCallback(
-    (text: string, isSafety = false, speakIt = true) => {
-      const msg: Message = {
-        id: uid(),
-        participantId: "ai",
-        participantName: isSafety ? "Safety Copilot" : "AI Facilitator",
-        text,
-        timestamp: now(),
-        reactions: {},
-        isAI: true,
-        isSafety,
-      };
-      pushMessage(msg);
-      if (speakIt && !isMuted) speak(text).catch(() => {});
-    },
-    [isMuted, pushMessage]
-  );
+  const addTherapistMessage = useCallback((text: string) => {
+    pushMessage({
+      id: uid(),
+      participantId: DEMO_THERAPIST.id,
+      participantName: DEMO_THERAPIST.name,
+      role: "therapist",
+      text,
+      timestamp: now(),
+      reactions: {},
+    });
+  }, [pushMessage]);
 
-  const addBotMessage = useCallback(
-    (participantId: string, name: string, text: string) => {
-      pushMessage({
-        id: uid(),
-        participantId,
-        participantName: name,
-        text,
-        timestamp: now(),
-        reactions: {},
-      });
-    },
-    [pushMessage]
-  );
-
-  // ─── Bot helpers ───────────────────────────────────────────────────────────
+  const addMemberMessage = useCallback((participantId: string, name: string, text: string) => {
+    pushMessage({
+      id: uid(),
+      participantId,
+      participantName: name,
+      role: "member",
+      text,
+      timestamp: now(),
+      reactions: {},
+    });
+  }, [pushMessage]);
 
   const fetchBotCheckin = async (participantId: string): Promise<string> => {
     try {
@@ -154,150 +148,163 @@ export default function SessionPage() {
     }
   };
 
-  // ─── Session start: bot check-ins ─────────────────────────────────────────
+  const getParticipationSnapshot = useCallback((current: Message[]) => {
+    const memberMessages = current.filter((message) => message.role === "member");
+    const counts = new Map<string, number>();
 
-  const startCheckin = useCallback(async () => {
-    abortRef.current = false;
-    setPhase("checkin");
-
-    addAIMessage(
-      "Welcome, everyone. Let's take a moment to check in — share whatever feels true for you right now, even just a word or two.",
-      false,
-      true
-    );
-
-    await sleep(1800);
-
-    for (const p of DEMO_PARTICIPANTS) {
-      if (abortRef.current) return;
-      setTypingBot(p.id);
-      const checkin = await fetchBotCheckin(p.id);
-      await sleep(1000 + Math.random() * 600);
-      if (abortRef.current) return;
-      setTypingBot(null);
-      addBotMessage(p.id, p.name, checkin);
-      await sleep(700);
+    for (const message of memberMessages) {
+      counts.set(message.participantName, (counts.get(message.participantName) || 0) + 1);
     }
 
-    await sleep(1400);
-    if (abortRef.current) return;
+    const quietParticipants = DEMO_PARTICIPANTS
+      .filter((participant) => (counts.get(participant.name) || 0) <= 1)
+      .map((participant) => participant.name);
 
-    addAIMessage(
-      "Thank you all. This is a space to be real — no pressure to have it figured out. What's alive for anyone right now?",
-      false,
-      true
-    );
+    let dominantSpeaker: string | null = null;
+    let dominantCount = 0;
 
-    await sleep(600);
-    setPhase("live");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addAIMessage, addBotMessage]);
-
-  // ─── Bot replies after user speaks ────────────────────────────────────────
-
-  const queueBotReplies = useCallback(
-    async (userText: string, historySnapshot: Message[]) => {
-      const history = historySnapshot.map((m) => ({ name: m.participantName, text: m.text }));
-      const latestMessage = { name: "You", text: userText };
-
-      // Pick 2–3 random bots to respond (not all 5)
-      const shuffled = [...DEMO_PARTICIPANTS].sort(() => Math.random() - 0.5);
-      const respondingBots = shuffled.slice(0, Math.random() > 0.4 ? 3 : 2);
-
-      for (const p of respondingBots) {
-        if (abortRef.current) return;
-        await sleep(1200 + Math.random() * 800);
-        setTypingBot(p.id);
-        const response = await fetchBotResponse(p.id, history, latestMessage);
-        await sleep(900 + Math.random() * 600);
-        if (abortRef.current) return;
-        setTypingBot(null);
-        addBotMessage(p.id, p.name, response);
-        await sleep(500);
+    counts.forEach((count, name) => {
+      if (count > dominantCount) {
+        dominantSpeaker = name;
+        dominantCount = count;
       }
-    },
-    [addBotMessage]
-  );
+    });
 
-  // ─── Auto facilitator ─────────────────────────────────────────────────────
+    return {
+      quietParticipants,
+      dominantSpeaker: dominantCount >= 3 ? dominantSpeaker : null,
+    };
+  }, []);
 
-  const triggerFacilitator = useCallback(async () => {
-    if (facilitatorLoading) return;
-    setFacilitatorLoading(true);
+  const triggerCopilot = useCallback(async () => {
+    if (copilotLoading || phase !== "live") return;
+    setCopilotLoading(true);
 
     const current = messagesRef.current;
-    const transcript = current.map((m) => `${m.participantName}: ${m.text}`).join("\n");
-
-    // Find quieter participants (haven't spoken recently)
-    const recentSpeakers = new Set(current.slice(-6).map((m) => m.participantName));
-    const quietParticipants = DEMO_PARTICIPANTS
-      .filter((p) => !recentSpeakers.has(p.name))
-      .map((p) => p.name);
+    const transcript = current.map((message) => `${message.participantName}: ${message.text}`).join("\n");
+    const participation = getParticipationSnapshot(current);
 
     try {
       const res = await fetch("/api/facilitate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript, sessionPhase: "live", quietParticipants }),
+        body: JSON.stringify({
+          transcript,
+          sessionPhase: "live",
+          quietParticipants: participation.quietParticipants,
+          participantCount: DEMO_PARTICIPANTS.length + 1,
+        }),
       });
       const data = await res.json();
-      const prompt = data.prompt || "What's sitting with anyone right now that hasn't been said yet?";
-      addAIMessage(prompt, false, true);
+      const prompt = data.prompt || "Let's pause and hear from someone who hasn't had much space yet.";
+      setCopilotSuggestion({
+        prompt,
+        rationale: participation.dominantSpeaker
+          ? `${participation.dominantSpeaker} has been carrying more of the airtime. Invite another voice in without shutting anyone down.`
+          : "The group has enough emotional material on the table for a structured follow-up question.",
+        quietParticipants: participation.quietParticipants,
+        dominantSpeaker: participation.dominantSpeaker,
+      });
     } catch {
-      addAIMessage("What's sitting with anyone right now that hasn't been said yet?", false, true);
+      setCopilotSuggestion({
+        prompt: "Let's slow this down for a moment. Who hasn't had a chance to speak yet and wants to name what's most present right now?",
+        rationale: "Fallback recommendation when Gemini is unavailable.",
+        quietParticipants: participation.quietParticipants,
+        dominantSpeaker: participation.dominantSpeaker,
+      });
     } finally {
-      setFacilitatorLoading(false);
+      setCopilotLoading(false);
     }
-  }, [facilitatorLoading, addAIMessage]);
+  }, [copilotLoading, getParticipationSnapshot, phase]);
 
-  // ─── Safety copilot ───────────────────────────────────────────────────────
+  const useCopilotSuggestion = useCallback(() => {
+    if (!copilotSuggestion) return;
+    addTherapistMessage(copilotSuggestion.prompt);
+    setCopilotSuggestion(null);
+  }, [addTherapistMessage, copilotSuggestion]);
 
-  const checkSafety = useCallback(
-    async (text: string) => {
-      try {
-        const res = await fetch("/api/safety", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text }),
-        });
-        const data = await res.json();
-        if ((data.riskLevel === "high" || data.riskLevel === "medium") && data.response) {
-          setSafetyActive(true);
-          await sleep(1200);
-          addAIMessage(data.response, true, true);
-        }
-      } catch { /* silent */ }
-    },
-    [addAIMessage]
-  );
-
-  const triggerSafetyCopilot = useCallback(async () => {
-    setSafetyActive(true);
-    const triggerText = "Sometimes I feel so overwhelmed I don't know what to do. Like there's no way through.";
-    addBotMessage("david", "David", triggerText);
-    await sleep(1500);
+  const checkSafety = useCallback(async (text: string) => {
     try {
       const res = await fetch("/api/safety", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: triggerText }),
+        body: JSON.stringify({ message: text }),
       });
       const data = await res.json();
-      addAIMessage(
-        data.response || "I'm really glad you shared that. Would grounding support feel helpful right now? If you may be in immediate danger, please reach out to a crisis line — in the US, call or text 988.",
-        true,
-        true
-      );
+      if ((data.riskLevel === "high" || data.riskLevel === "medium") && data.response) {
+        setSafetyRecommendation({
+          riskLevel: data.riskLevel,
+          response: data.response,
+          resources: data.resources || [],
+        });
+      }
     } catch {
-      addAIMessage(
-        "I'm really glad you shared that. Would grounding support feel helpful right now? If you may be in immediate danger, please reach out to a crisis line — in the US, call or text 988.",
-        true,
-        true
-      );
+      // Ignore transient demo errors and keep the session moving.
     }
-  }, [addAIMessage, addBotMessage]);
+  }, []);
 
-  // ─── Send message ─────────────────────────────────────────────────────────
+  const useSafetyResponse = useCallback(() => {
+    if (!safetyRecommendation) return;
+    addTherapistMessage(safetyRecommendation.response);
+    setSafetyRecommendation(null);
+  }, [addTherapistMessage, safetyRecommendation]);
+
+  const triggerSafetyAlert = useCallback(async () => {
+    const triggerText = "I feel completely trapped lately. I don't know how much longer I can keep pretending I'm okay.";
+    addMemberMessage("david", "David", triggerText);
+    await sleep(800);
+    await checkSafety(triggerText);
+  }, [addMemberMessage, checkSafety]);
+
+  const startCheckin = useCallback(async () => {
+    abortRef.current = false;
+    setPhase("checkin");
+
+    addTherapistMessage(
+      "Welcome back, everyone. This pod is a structured space for support, and I'll help guide us through check-in before we open up the broader conversation."
+    );
+
+    await sleep(1500);
+
+    for (const participant of DEMO_PARTICIPANTS) {
+      if (abortRef.current) return;
+      setTypingBot(participant.id);
+      const checkin = await fetchBotCheckin(participant.id);
+      await sleep(900 + Math.random() * 500);
+      if (abortRef.current) return;
+      setTypingBot(null);
+      addMemberMessage(participant.id, participant.name, checkin);
+      await sleep(500);
+    }
+
+    await sleep(1000);
+    if (abortRef.current) return;
+
+    addTherapistMessage(
+      "Thank you. I’m hearing burnout, isolation, and pressure to keep performing. Let’s stay with those themes and make sure each person gets room to be specific."
+    );
+    setPhase("live");
+  }, [addMemberMessage, addTherapistMessage]);
+
+  const queueBotReplies = useCallback(async (userText: string, historySnapshot: Message[]) => {
+    const history = historySnapshot.map((message) => ({ name: message.participantName, text: message.text }));
+    const latestMessage = { name: "You", text: userText };
+
+    const shuffled = [...DEMO_PARTICIPANTS].sort(() => Math.random() - 0.5);
+    const respondingBots = shuffled.slice(0, Math.random() > 0.4 ? 3 : 2);
+
+    for (const participant of respondingBots) {
+      if (abortRef.current) return;
+      await sleep(1200 + Math.random() * 800);
+      setTypingBot(participant.id);
+      const response = await fetchBotResponse(participant.id, history, latestMessage);
+      await sleep(800 + Math.random() * 500);
+      if (abortRef.current) return;
+      setTypingBot(null);
+      addMemberMessage(participant.id, participant.name, response);
+      await sleep(400);
+    }
+  }, [addMemberMessage]);
 
   const handleSend = useCallback(async () => {
     if (!typedMessage.trim() || phase !== "live") return;
@@ -308,29 +315,25 @@ export default function SessionPage() {
       id: uid(),
       participantId: "you",
       participantName: "You",
+      role: "member",
       text,
       timestamp: now(),
       reactions: {},
     };
     pushMessage(userMsg);
 
-    const newCount = userMessageCount + 1;
-    setUserMessageCount(newCount);
+    const nextCount = userMessageCount + 1;
+    setUserMessageCount(nextCount);
 
-    // Safety check runs in background
     checkSafety(text);
 
-    // Snapshot history before bots add messages
     const snapshot = [...messagesRef.current, userMsg];
     queueBotReplies(text, snapshot);
 
-    // Auto-facilitate every 3 user messages
-    if (newCount % 3 === 0) {
-      setTimeout(() => triggerFacilitator(), 7000);
+    if (nextCount % 2 === 0) {
+      setTimeout(() => triggerCopilot(), 4500);
     }
-  }, [typedMessage, phase, userMessageCount, pushMessage, checkSafety, queueBotReplies, triggerFacilitator]);
-
-  // ─── Mic recording ────────────────────────────────────────────────────────
+  }, [checkSafety, phase, pushMessage, queueBotReplies, triggerCopilot, typedMessage, userMessageCount]);
 
   const toggleMic = useCallback(async () => {
     if (isRecording) {
@@ -338,103 +341,108 @@ export default function SessionPage() {
       setIsRecording(false);
       return;
     }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
       recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
+        stream.getTracks().forEach((track) => track.stop());
         try {
           const fd = new FormData();
           fd.append("audio", new Blob(chunks, { type: "audio/webm" }), "message.webm");
           const res = await fetch("/api/transcribe", { method: "POST", body: fd });
           const data = await res.json();
           if (data.transcript) setTypedMessage(data.transcript);
-        } catch { /* silent */ }
+        } catch {
+          // Silent fallback for the demo flow.
+        }
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
-    } catch { /* mic denied */ }
+    } catch {
+      // Mic access is optional in the demo.
+    }
   }, [isRecording]);
 
-  // ─── Reactions ────────────────────────────────────────────────────────────
-
-  const addReaction = useCallback((msgId: string, reaction: string) => {
+  const addReaction = useCallback((messageId: string, reaction: string) => {
     setMessages((prev) =>
-      prev.map((m) =>
-        m.id === msgId
-          ? { ...m, reactions: { ...m.reactions, [reaction]: (m.reactions[reaction] || 0) + 1 } }
-          : m
+      prev.map((message) =>
+        message.id === messageId
+          ? { ...message, reactions: { ...message.reactions, [reaction]: (message.reactions[reaction] || 0) + 1 } }
+          : message
       )
     );
   }, []);
 
-  // ─── End session ──────────────────────────────────────────────────────────
-
   const endSession = useCallback(() => {
     abortRef.current = true;
     setPhase("ended");
-    // Build a transcript string and store for summary page
     const transcript = messagesRef.current
-      .map((m) => `${m.participantName}: ${m.text}`)
+      .map((message) => `${message.participantName}: ${message.text}`)
       .join("\n");
     sessionStorage.setItem("resonance_transcript", transcript);
-    setTimeout(() => router.push("/summary"), 1500);
+    setTimeout(() => router.push("/summary"), 1200);
   }, [router]);
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const participationSnapshot = getParticipationSnapshot(messages);
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
-      {/* Top bar */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
             <Heart className="w-4 h-4 text-primary" />
           </div>
           <div>
-            <span className="font-semibold text-foreground">Imposter Syndrome Circle</span>
+            <span className="font-semibold text-foreground">{DEMO_POD.name}</span>
             <div className="flex items-center gap-2 mt-0.5">
+              <Badge variant="secondary" className="text-xs">{DEMO_THERAPIST.name}</Badge>
               {phase === "live" && (
                 <Badge variant="destructive" className="text-xs px-2 py-0 gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse inline-block" />
-                  Live
+                  Weekly session live
                 </Badge>
               )}
-              {phase === "waiting" && <Badge variant="secondary" className="text-xs">Waiting</Badge>}
-              {phase === "checkin"  && <Badge variant="secondary" className="text-xs">Check-in</Badge>}
-              {phase === "ended"   && <Badge className="text-xs bg-green-600">Complete</Badge>}
+              {phase === "waiting" && <Badge variant="outline" className="text-xs">Pod chat open</Badge>}
+              {phase === "checkin" && <Badge variant="outline" className="text-xs">Check-in</Badge>}
+              {phase === "ended" && <Badge className="text-xs bg-green-600">Therapist review next</Badge>}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setIsMuted(!isMuted)} className="gap-1.5 text-muted-foreground">
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </Button>
-          <Button variant="ghost" size="sm" onClick={endSession} className="gap-1.5 text-muted-foreground">
-            <LogOut className="w-4 h-4" />
-            End
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={endSession} className="gap-1.5 text-muted-foreground">
+          <LogOut className="w-4 h-4" />
+          End
+        </Button>
       </div>
 
-      {/* 3-column layout */}
       <div className="flex flex-1 overflow-hidden">
-
-        {/* LEFT: Participants */}
-        <div className="w-52 border-r border-border/50 p-4 flex flex-col gap-2 shrink-0 overflow-y-auto">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Circle</p>
-          {DEMO_PARTICIPANTS.map((p) => (
-            <div key={p.id} className="flex items-center gap-2.5">
-              <div className={`relative w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${PARTICIPANT_COLORS[p.id]}`}>
-                {p.initial}
-                {typingBot === p.id && (
+        <div className="w-56 border-r border-border/50 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pod roster</p>
+          <div className="rounded-xl border border-border/70 bg-card p-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold bg-slate-200 text-slate-800">
+                {DEMO_THERAPIST.initial}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">{DEMO_THERAPIST.name}</p>
+                <p className="text-xs text-muted-foreground">{DEMO_THERAPIST.title}</p>
+              </div>
+            </div>
+          </div>
+          {DEMO_PARTICIPANTS.map((participant) => (
+            <div key={participant.id} className="flex items-center gap-2.5">
+              <div className={`relative w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${PARTICIPANT_COLORS[participant.id]}`}>
+                {participant.initial}
+                {typingBot === participant.id && (
                   <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-background animate-pulse" />
                 )}
               </div>
-              <span className="text-sm text-foreground">{p.name}</span>
+              <span className="text-sm text-foreground">{participant.name}</span>
             </div>
           ))}
           <Separator className="my-2" />
@@ -443,50 +451,55 @@ export default function SessionPage() {
               Y
             </div>
             <span className="text-sm font-medium text-foreground">You</span>
-            <Badge variant="outline" className="text-xs ml-auto">me</Badge>
+            <Badge variant="outline" className="text-xs ml-auto">private journal enabled</Badge>
           </div>
+          <Card className="mt-2 bg-muted/40">
+            <CardContent className="p-3">
+              <p className="text-xs font-medium text-foreground mb-1">Between sessions</p>
+              <p className="text-xs text-muted-foreground">{DEMO_POD.chatDescription}</p>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* CENTER: Chat */}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 p-5 space-y-4">
-
             {phase === "waiting" && (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-5">
-                  <Sparkles className="w-7 h-7 text-primary" />
+                  <Users className="w-7 h-7 text-primary" />
                 </div>
-                <h2 className="font-semibold text-foreground mb-2">Everyone&apos;s here</h2>
-                <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-                  Start the session and each member will check in. Then it&apos;s your turn.
+                <h2 className="font-semibold text-foreground mb-2">Your pod workspace is ready</h2>
+                <p className="text-sm text-muted-foreground mb-6 max-w-sm">
+                  The private pod chat stays open between sessions. Start the therapist-led meeting when you are ready to run check-in.
                 </p>
                 <Button onClick={startCheckin} className="gap-2">
                   <Sparkles className="w-4 h-4" />
-                  Start Check-In
+                  Start Weekly Session
                 </Button>
               </div>
             )}
 
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} onReact={addReaction} />
+            {messages.map((message) => (
+              <MessageBubble key={message.id} message={message} onReact={addReaction} />
             ))}
 
             {typingBot && (
               <TypingIndicator
                 participantId={typingBot}
-                name={DEMO_PARTICIPANTS.find((p) => p.id === typingBot)?.name || ""}
-                initial={DEMO_PARTICIPANTS.find((p) => p.id === typingBot)?.initial || "?"}
+                name={DEMO_PARTICIPANTS.find((participant) => participant.id === typingBot)?.name || ""}
+                initial={DEMO_PARTICIPANTS.find((participant) => participant.id === typingBot)?.initial || "?"}
               />
             )}
 
             {phase === "ended" && (
               <div className="text-center py-10">
-                <p className="text-sm text-muted-foreground">Session complete — generating your reflection...</p>
+                <p className="text-sm text-muted-foreground">
+                  Session complete. AI notes are moving into therapist review before the member recap is released.
+                </p>
               </div>
             )}
           </div>
 
-          {/* Input bar */}
           {phase === "live" && (
             <div className="border-t border-border/50 p-4 shrink-0">
               <div className="flex items-center gap-2">
@@ -500,10 +513,15 @@ export default function SessionPage() {
                 </button>
                 <input
                   className="flex-1 bg-muted/50 rounded-xl px-4 py-2.5 text-sm outline-none border border-transparent focus:border-primary/30 placeholder:text-muted-foreground"
-                  placeholder="Share something with the circle..."
+                  placeholder="Share something with the pod..."
                   value={typedMessage}
-                  onChange={(e) => setTypedMessage(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
+                  onChange={(event) => setTypedMessage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSend();
+                    }
+                  }}
                 />
                 <button
                   onClick={handleSend}
@@ -515,109 +533,152 @@ export default function SessionPage() {
               </div>
               {isRecording && (
                 <p className="text-xs text-red-500 mt-2 text-center animate-pulse">
-                  Recording — tap the mic button to stop and transcribe
+                  Recording for transcription with Deepgram — tap again to stop
                 </p>
               )}
             </div>
           )}
         </div>
 
-        {/* RIGHT: Facilitator panel */}
-        <div className="w-64 border-l border-border/50 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">AI Facilitator</p>
+        <div className="w-80 border-l border-border/50 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Therapist workspace</p>
 
           <Card className="bg-primary/5 border-primary/20">
             <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-1">
-                <Sparkles className="w-3.5 h-3.5 text-primary" />
-                <span className="text-xs font-medium text-primary">
-                  {phase === "live" ? "Active" : phase === "checkin" ? "Leading check-in" : "Standby"}
-                </span>
+                <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                <span className="text-xs font-medium text-primary">AI copilot active</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                {phase === "live"
-                  ? "Listening and will facilitate every few exchanges automatically."
-                  : "Will facilitate once the session goes live."}
+                AI is assisting with note-taking, moderation, participation balance, and post-session recap drafting for therapist review.
               </p>
             </CardContent>
           </Card>
 
-          <Separator />
+          <Card>
+            <CardContent className="p-3 space-y-2">
+              <p className="text-xs font-medium text-foreground">Participation balance</p>
+              <p className="text-xs text-muted-foreground">
+                {participationSnapshot.quietParticipants.length > 0
+                  ? `Quieter voices: ${participationSnapshot.quietParticipants.join(", ")}`
+                  : "Everyone has contributed at least once."}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {participationSnapshot.dominantSpeaker
+                  ? `Most active speaker: ${participationSnapshot.dominantSpeaker}`
+                  : "No dominant speaker pattern detected yet."}
+              </p>
+            </CardContent>
+          </Card>
 
           <div className="space-y-2">
             {phase === "waiting" && (
               <Button variant="outline" size="sm" className="w-full gap-2 justify-start" onClick={startCheckin}>
                 <Sparkles className="w-3.5 h-3.5" />
-                Start Check-In
+                Start Weekly Session
               </Button>
             )}
 
             <Button
-              variant="outline" size="sm"
+              variant="outline"
+              size="sm"
               className="w-full gap-2 justify-start"
-              onClick={triggerFacilitator}
-              disabled={facilitatorLoading || phase !== "live"}
+              onClick={triggerCopilot}
+              disabled={copilotLoading || phase !== "live"}
             >
               <Sparkles className="w-3.5 h-3.5 text-primary" />
-              {facilitatorLoading ? "Thinking..." : "Facilitate Now"}
+              {copilotLoading ? "Generating guidance..." : "Generate facilitator guidance"}
             </Button>
 
             <Button
-              variant="outline" size="sm"
+              variant="outline"
+              size="sm"
               className="w-full gap-2 justify-start text-red-600 border-red-200 hover:bg-red-50"
-              onClick={triggerSafetyCopilot}
-              disabled={safetyActive || phase !== "live"}
+              onClick={triggerSafetyAlert}
+              disabled={phase !== "live"}
             >
               <Shield className="w-3.5 h-3.5" />
-              {safetyActive ? "Safety active" : "Trigger Safety Copilot"}
+              Simulate moderation flag
             </Button>
 
             <Button variant="outline" size="sm" className="w-full gap-2 justify-start" onClick={endSession}>
               <LogOut className="w-3.5 h-3.5" />
-              End Session
+              End session and queue therapist review
             </Button>
           </div>
+
+          {copilotSuggestion && (
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="p-3 space-y-3">
+                <div>
+                  <p className="text-xs font-medium text-primary mb-1">Suggested facilitator move</p>
+                  <p className="text-sm text-foreground leading-relaxed">{copilotSuggestion.prompt}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-foreground mb-1">Why now</p>
+                  <p className="text-xs text-muted-foreground">{copilotSuggestion.rationale}</p>
+                </div>
+                <Button size="sm" className="w-full" onClick={useCopilotSuggestion}>
+                  Therapist uses this prompt
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {safetyRecommendation && (
+            <Card className="bg-red-50 border-red-200">
+              <CardContent className="p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-600" />
+                  <span className="text-xs font-medium text-red-700">
+                    Moderation recommendation: {safetyRecommendation.riskLevel} attention
+                  </span>
+                </div>
+                <p className="text-sm text-red-900 leading-relaxed">{safetyRecommendation.response}</p>
+                {safetyRecommendation.resources.length > 0 && (
+                  <p className="text-xs text-red-700">
+                    Resources ready: {safetyRecommendation.resources.join(", ")}
+                  </p>
+                )}
+                <Button size="sm" variant="outline" className="w-full border-red-200" onClick={useSafetyResponse}>
+                  Therapist shares grounding response
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           <Separator />
 
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">Resonance reactions</p>
+            <p className="text-xs font-medium text-muted-foreground mb-2">Reaction shortcuts</p>
             <div className="space-y-1">
-              {REACTIONS.map((r) => (
-                <div key={r} className="flex items-center gap-2">
+              {REACTIONS.map((reaction) => (
+                <div key={reaction} className="flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
-                  <span className="text-xs text-muted-foreground">{r}</span>
+                  <span className="text-xs text-muted-foreground">{reaction}</span>
                 </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground/50 mt-1.5">Hover a message to react</p>
           </div>
 
-          {safetyActive && (
-            <>
-              <Separator />
-              <Card className="bg-red-50 border-red-200">
-                <CardContent className="p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <AlertCircle className="w-3.5 h-3.5 text-red-600" />
-                    <span className="text-xs font-medium text-red-700">Safety Copilot active</span>
-                  </div>
-                  <p className="text-xs text-red-600">Monitoring. Resources ready.</p>
-                </CardContent>
-              </Card>
-            </>
-          )}
+          <Card className="bg-muted/40">
+            <CardContent className="p-3">
+              <p className="text-xs font-medium text-foreground mb-1">Release workflow</p>
+              <p className="text-xs text-muted-foreground">
+                AI drafts therapist notes and member recaps after the session. Member-facing summaries stay locked until the therapist reviews them.
+              </p>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function MessageBubble({ message, onReact }: { message: Message; onReact: (id: string, r: string) => void }) {
+function MessageBubble({ message, onReact }: { message: Message; onReact: (id: string, reaction: string) => void }) {
   const [hovering, setHovering] = useState(false);
   const isYou = message.participantId === "you";
+  const isTherapist = message.role === "therapist";
 
   return (
     <div
@@ -627,13 +688,11 @@ function MessageBubble({ message, onReact }: { message: Message; onReact: (id: s
     >
       {!isYou && (
         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${
-          message.isSafety
-            ? "bg-red-100 text-red-700"
-            : message.isAI
-            ? "bg-primary/10 text-primary"
+          isTherapist
+            ? "bg-slate-200 text-slate-800"
             : PARTICIPANT_COLORS[message.participantId] || "bg-muted text-muted-foreground"
         }`}>
-          {message.isSafety ? "🛡" : message.isAI ? "✦" : message.participantName[0]}
+          {isTherapist ? DEMO_THERAPIST.initial : message.participantName[0]}
         </div>
       )}
 
@@ -641,8 +700,7 @@ function MessageBubble({ message, onReact }: { message: Message; onReact: (id: s
         {!isYou && (
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-foreground">{message.participantName}</span>
-            {message.isAI && !message.isSafety && <Badge variant="secondary" className="text-xs px-1.5 py-0">AI</Badge>}
-            {message.isSafety && <Badge className="text-xs px-1.5 py-0 bg-red-100 text-red-700 border-red-200">Safety</Badge>}
+            {isTherapist && <Badge variant="secondary" className="text-xs px-1.5 py-0">Therapist</Badge>}
             <span className="text-xs text-muted-foreground">{message.timestamp}</span>
           </div>
         )}
@@ -650,10 +708,8 @@ function MessageBubble({ message, onReact }: { message: Message; onReact: (id: s
         <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
           isYou
             ? "bg-primary text-primary-foreground rounded-tr-sm"
-            : message.isSafety
-            ? "bg-red-50 text-red-900 border border-red-200 rounded-tl-sm"
-            : message.isAI
-            ? "bg-primary/10 text-foreground border border-primary/20 rounded-tl-sm"
+            : isTherapist
+            ? "bg-slate-100 text-slate-900 border border-slate-200 rounded-tl-sm"
             : "bg-card text-foreground border border-border rounded-tl-sm"
         }`}>
           {message.text}
@@ -661,21 +717,27 @@ function MessageBubble({ message, onReact }: { message: Message; onReact: (id: s
 
         {Object.keys(message.reactions).length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {Object.entries(message.reactions).map(([r, count]) => (
-              <button key={r} onClick={() => onReact(message.id, r)}
-                className="text-xs bg-muted/60 border border-border rounded-full px-2 py-0.5 hover:bg-muted transition-colors">
-                {r} {count}
+            {Object.entries(message.reactions).map(([reaction, count]) => (
+              <button
+                key={reaction}
+                onClick={() => onReact(message.id, reaction)}
+                className="text-xs bg-muted/60 border border-border rounded-full px-2 py-0.5 hover:bg-muted transition-colors"
+              >
+                {reaction} {count}
               </button>
             ))}
           </div>
         )}
 
-        {hovering && !message.isAI && !isYou && (
+        {hovering && !isYou && !isTherapist && (
           <div className="flex gap-1 flex-wrap mt-0.5">
-            {REACTIONS.map((r) => (
-              <button key={r} onClick={() => onReact(message.id, r)}
-                className="text-xs bg-card border border-border rounded-full px-2 py-0.5 hover:bg-muted transition-colors text-muted-foreground">
-                {r}
+            {REACTIONS.map((reaction) => (
+              <button
+                key={reaction}
+                onClick={() => onReact(message.id, reaction)}
+                className="text-xs bg-card border border-border rounded-full px-2 py-0.5 hover:bg-muted transition-colors text-muted-foreground"
+              >
+                {reaction}
               </button>
             ))}
           </div>
@@ -694,9 +756,12 @@ function TypingIndicator({ participantId, name, initial }: { participantId: stri
       <div className="flex flex-col gap-0.5">
         <span className="text-xs text-muted-foreground">{name}</span>
         <div className="bg-card border border-border rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
-              style={{ animationDelay: `${i * 150}ms` }} />
+          {[0, 1, 2].map((index) => (
+            <div
+              key={index}
+              className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
+              style={{ animationDelay: `${index * 150}ms` }}
+            />
           ))}
         </div>
       </div>

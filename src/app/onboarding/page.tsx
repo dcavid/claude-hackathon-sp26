@@ -9,21 +9,21 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Mic, Square, Heart, ArrowRight, Check, Loader2 } from "lucide-react";
 
 const TOPIC_CHIPS = [
-  "Imposter syndrome",
-  "Academic stress",
-  "Loneliness",
   "Grief",
-  "Relationships",
-  "Life transitions",
-  "Anxiety",
   "Burnout",
+  "Loneliness",
+  "Life transitions",
+  "Trauma",
+  "Relationships",
+  "Anxiety",
+  "Caregiving stress",
 ];
 
 const SUPPORT_PREFS = [
-  { id: "listening", label: "I want listening" },
-  { id: "advice", label: "I want advice" },
-  { id: "accountability", label: "I want accountability" },
-  { id: "support-others", label: "I want to support others too" },
+  { id: "listening", label: "I want space to process" },
+  { id: "structure", label: "I want a structured session" },
+  { id: "peer-support", label: "I want peer support between meetings" },
+  { id: "support-others", label: "I also want to support others" },
 ];
 
 type RecordingState = "idle" | "recording" | "recorded" | "transcribing";
@@ -134,7 +134,7 @@ export default function OnboardingPage() {
           <Badge variant="secondary" className="mb-4 text-xs">Step 1 of 2</Badge>
           <h1 className="text-3xl font-bold text-foreground mb-3">What&apos;s been on your mind lately?</h1>
           <p className="text-muted-foreground leading-relaxed">
-            Share a short voice reflection or type below. This helps us find the right support circle for you.
+            Share a short intake reflection or type below. We use this to match you into a therapist-led pod with people facing similar challenges.
           </p>
         </div>
 
@@ -147,7 +147,7 @@ export default function OnboardingPage() {
                   <Mic className="w-9 h-9 text-primary" />
                 </div>
                 <p className="text-sm text-muted-foreground mb-5 text-center">
-                  Tap to record your reflection — usually 30–60 seconds
+                  Tap to record your intake reflection — usually 30–60 seconds
                 </p>
                 <Button onClick={startRecording} className="gap-2">
                   <Mic className="w-4 h-4" />
@@ -216,6 +216,9 @@ export default function OnboardingPage() {
             placeholder="I've been feeling like everyone around me is doing more than me..."
             className="min-h-[100px] resize-none text-sm"
           />
+          <p className="text-xs text-muted-foreground mt-2">
+            Demo note: voice is transcribed with Deepgram, and Gemini uses your reflection plus selected topics for pod matching.
+          </p>
         </div>
 
         {/* Topics */}
@@ -240,7 +243,7 @@ export default function OnboardingPage() {
 
         {/* Support preferences */}
         <div className="mb-10">
-          <label className="text-sm font-medium text-foreground block mb-3">What kind of support are you looking for?</label>
+          <label className="text-sm font-medium text-foreground block mb-3">What kind of support would help most?</label>
           <div className="grid grid-cols-2 gap-2">
             {SUPPORT_PREFS.map((pref) => (
               <button

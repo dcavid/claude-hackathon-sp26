@@ -1,5 +1,5 @@
 // Real-time / simulated streaming transcription for live pod sessions.
-// In production this would use Google Speech-to-Text streaming via WebSocket.
+// In production this would use Deepgram streaming via WebSocket.
 // For demo purposes this simulates live transcription from mic input.
 
 export interface LiveTranscriptChunk {
@@ -18,12 +18,6 @@ export async function startLiveTranscription(
   sessionId: string,
   onTranscript: TranscriptCallback
 ): Promise<LiveTranscriptionSession> {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_SPEECH_API_KEY;
-
-  if (!apiKey) {
-    return startSimulatedTranscription(sessionId, onTranscript);
-  }
-
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });

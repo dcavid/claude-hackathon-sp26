@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Heart, Shield, Mic, Users, Sparkles, ArrowRight, MessageCircle } from "lucide-react";
+import { Heart, Shield, Mic, Users, Sparkles, ArrowRight, MessageCircle, ClipboardList } from "lucide-react";
 
 export default function LandingPage() {
   return (
@@ -17,9 +17,9 @@ export default function LandingPage() {
           <span className="font-semibold text-lg tracking-tight text-foreground">Resonance</span>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-sm text-muted-foreground">A safe space for peer support</span>
+          <span className="text-sm text-muted-foreground">Therapist-led pods with AI support</span>
           <Link href="/onboarding">
-            <Button size="sm" variant="outline">Join a Circle</Button>
+            <Button size="sm" variant="outline">Find Your Pod</Button>
           </Link>
         </div>
       </nav>
@@ -28,7 +28,7 @@ export default function LandingPage() {
       <section className="max-w-4xl mx-auto px-8 pt-24 pb-16 text-center">
         <Badge variant="secondary" className="mb-6 text-xs px-3 py-1">
           <Sparkles className="w-3 h-3 mr-1" />
-          AI-facilitated peer support
+          Therapist-led group care, AI-assisted
         </Badge>
         <h1 className="text-5xl font-bold leading-tight tracking-tight text-foreground mb-6">
           You don&apos;t have to carry it
@@ -36,12 +36,12 @@ export default function LandingPage() {
           <span className="text-primary">alone.</span>
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed mb-10">
-          Resonance helps people join recurring support circles where AI facilitates emotionally safe peer conversations — structured, human, and built on trust.
+          Resonance matches people into small therapist-led pods, keeps support going through private group chat, and gives therapists an AI copilot for notes, moderation, and participation balance.
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link href="/onboarding">
             <Button size="lg" className="gap-2 px-8 text-base">
-              Join a Circle
+              Find Your Pod
               <ArrowRight className="w-4 h-4" />
             </Button>
           </Link>
@@ -61,19 +61,19 @@ export default function LandingPage() {
             number="01"
             icon={<Mic className="w-5 h-5 text-primary" />}
             title="Share what's on your mind"
-            description="Record a short voice reflection. Our AI listens and understands the themes and support style that fits you."
+            description="Record or type an intake reflection. Gemini and your selected topics help match you by lived context, not just broad labels."
           />
           <StepCard
             number="02"
             icon={<Users className="w-5 h-5 text-primary" />}
-            title="Get matched to your circle"
-            description="You're placed in a small, recurring trust pod with people navigating similar experiences."
+            title="Join a therapist-led pod"
+            description="You are placed in a recurring pod of 4-6 people facing highly similar situations, with a licensed therapist facilitating the weekly session."
           />
           <StepCard
             number="03"
             icon={<MessageCircle className="w-5 h-5 text-primary" />}
-            title="Meet with AI facilitation"
-            description="Your pod meets weekly. AI quietly guides the conversation, ensures everyone is heard, and keeps the space safe."
+            title="Stay connected between sessions"
+            description="Your private pod chat stays open between meetings, while AI supports moderation and gives therapists session-ready insights."
           />
         </div>
       </section>
@@ -83,31 +83,31 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto px-8 py-16 grid grid-cols-1 md:grid-cols-2 gap-8">
           <ValueCard
             icon={<Shield className="w-5 h-5 text-primary" />}
-            title="Safety Copilot"
-            description="AI monitors for moments of distress and offers grounding support — never diagnostic, always human."
+            title="Therapist-facing AI copilot"
+            description="AI recommends moderation actions, flags participation imbalance, and drafts session notes for therapist review."
           />
           <ValueCard
             icon={<Heart className="w-5 h-5 text-primary" />}
-            title="Emotionally safe by design"
-            description="Every session ends with a reflection summary. You leave with clarity, not just conversation."
+            title="Emotionally safer structure"
+            description="The therapist leads the pod. AI stays in the background and supports the session without replacing human judgment."
           />
           <ValueCard
             icon={<Sparkles className="w-5 h-5 text-primary" />}
-            title="Voice-first"
-            description="Speak your truth. Voice captures nuance that forms can't — and it's how real support begins."
+            title="Voice-first intake"
+            description="Deepgram handles voice capture for intake and session prep, so people can speak instead of filling out rigid forms."
           />
           <ValueCard
-            icon={<Users className="w-5 h-5 text-primary" />}
-            title="Recurring pods"
-            description="Real support takes time. Your circle meets weekly so relationships and trust can deepen over time."
+            icon={<ClipboardList className="w-5 h-5 text-primary" />}
+            title="Progress and private journaling"
+            description="Members get therapist-reviewed recaps, mock progress history in the demo, and a private journal space between sessions."
           />
         </div>
       </section>
 
       {/* CTA */}
       <section className="max-w-2xl mx-auto px-8 py-24 text-center">
-        <h2 className="text-3xl font-bold text-foreground mb-4">Ready to find your circle?</h2>
-        <p className="text-muted-foreground mb-8">It starts with one voice reflection. No forms, no pressure.</p>
+        <h2 className="text-3xl font-bold text-foreground mb-4">Ready to find your pod?</h2>
+        <p className="text-muted-foreground mb-8">It starts with one intake reflection and ends in a therapist-led group that fits.</p>
         <Link href="/onboarding">
           <Button size="lg" className="gap-2 px-10 text-base">
             Get started
@@ -118,7 +118,7 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="border-t border-border/50 px-8 py-6 text-center text-sm text-muted-foreground">
-        Resonance &mdash; A safe space for peer support &bull; Built with care
+        Resonance &mdash; Therapist-led pods, AI-assisted support &bull; Built as a demo prototype
       </footer>
     </div>
   );

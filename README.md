@@ -1,19 +1,20 @@
-# Resonance — AI-Facilitated Peer Support Circles
+# Resonance — Therapist-Led Pods, AI-Assisted
 
-> Voice-first. Emotionally safe. Human.
+> Structured group care. Private pod support. AI behind the scenes.
 
-Resonance helps people join recurring support circles where AI facilitates peer conversations — structured, warm, and built on trust.
+Resonance is a demo prototype for matching people into therapist-led support pods, keeping support going through private group chat, and giving therapists an AI copilot for notes, moderation, participation balance, and recap drafting.
 
 ## Demo Flow
 
-1. **Landing** (`/`) — Learn about Resonance, click "Join a Circle"
-2. **Onboarding** (`/onboarding`) — Record a voice reflection or type what's on your mind. Select topics and support preferences.
-3. **Pod Match** (`/match`) — AI matches you into a support circle based on your reflection themes.
-4. **Live Session** (`/session`) — Join the live circle. Watch the demo conversation stream in. Use the right panel to:
-   - Generate a facilitator prompt
-   - Trigger the Safety Copilot
-   - React to messages ("I relate", "I hear you", "Thank you for sharing")
-5. **Summary** (`/summary`) — Post-session reflection: themes, personal takeaway, next step, next pod meeting.
+1. **Landing** (`/`) — Learn the product positioning: therapist-led pods with AI support.
+2. **Onboarding** (`/onboarding`) — Record or type an intake reflection, then choose relevant topics and support preferences.
+3. **Pod Match** (`/match`) — Gemini matches the member into a pod based on reflection context, not just broad categories.
+4. **Session Workspace** (`/session`) — The therapist leads the pod session while the right panel acts as a therapist workspace for:
+   - facilitator guidance recommendations
+   - moderation and safety suggestions
+   - participation balance signals
+   - therapist review workflow cues
+5. **Summary + Journal** (`/summary`) — Member-facing recap after therapist review, mocked progress history, and a private journal area.
 
 ## Quick Start
 
@@ -22,21 +23,20 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 — no API keys required. The app falls back to smart mock responses.
+Open http://localhost:3000. The app falls back to mock responses when API keys are missing.
 
 ## API Keys (Optional)
 
-Copy `.env.local.example` to `.env.local` and fill in keys to enable real AI/voice:
+Create a `.env` or `.env.local` file in the project root to enable real AI and voice services:
 
 ```bash
-cp .env.local.example .env.local
+cp .env.example .env.local
 ```
 
 | Variable | Purpose |
 |---|---|
-| `GEMINI_API_KEY` | Gemini Flash for facilitation, safety, matching, summaries |
-| `GOOGLE_SPEECH_API_KEY` | Google Speech-to-Text for voice transcription |
-| `NEXT_PUBLIC_GOOGLE_TTS_API_KEY` | Google TTS for spoken facilitator interventions |
+| `GEMINI_API_KEY` | Gemini Flash for intake matching, therapist guidance suggestions, safety analysis, and recap drafting |
+| `DEEPGRAM_API_KEY` | Deepgram Speech-to-Text for onboarding/session transcription and Text-to-Speech support |
 
 All features work without keys using mock responses that look real.
 
@@ -48,14 +48,15 @@ src/
 │   ├── page.tsx                  # Landing page
 │   ├── onboarding/page.tsx       # Voice onboarding
 │   ├── match/page.tsx            # Pod match
-│   ├── session/page.tsx          # Live support circle (main demo)
-│   ├── summary/page.tsx          # Post-session reflection
+│   ├── session/page.tsx          # Therapist-led pod session + AI workspace
+│   ├── summary/page.tsx          # Therapist-reviewed member recap + private journal
 │   └── api/
-│       ├── transcribe/route.ts   # Google Speech-to-Text (non-streaming)
+│       ├── transcribe/route.ts   # Deepgram Speech-to-Text (non-streaming)
+│       ├── speak/route.ts        # Deepgram Text-to-Speech proxy
 │       ├── match/route.ts        # Gemini pod matching
-│       ├── facilitate/route.ts   # Gemini facilitator prompts
+│       ├── facilitate/route.ts   # Gemini therapist guidance suggestions
 │       ├── safety/route.ts       # Gemini safety analysis
-│       └── summary/route.ts      # Gemini session summary
+│       └── summary/route.ts      # Gemini recap drafting
 └── lib/
     ├── ai/
     │   ├── facilitator.ts        # generateFacilitatorPrompt()
@@ -64,21 +65,22 @@ src/
     ├── voice/
     │   ├── onboardingTranscription.ts  # Non-real-time transcription
     │   ├── liveTranscription.ts        # Real-time/simulated transcription
-    │   └── textToSpeech.ts             # Spoken facilitator (Google TTS / Web Speech)
+    │   └── textToSpeech.ts             # Spoken facilitator (Deepgram TTS / Web Speech)
     └── demo/
-        └── seedData.ts           # Demo participants, transcript, pod data
+        └── seedData.ts           # Demo pod, therapist, recap, and progress data
 ```
 
 ## Tech Stack
 
 - **Next.js 16 + TypeScript + Tailwind CSS + shadcn/ui**
-- **Gemini Flash** — facilitation, safety analysis, pod matching, session summaries
-- **Google Speech-to-Text** — async onboarding transcription
-- **Google Text-to-Speech** — spoken facilitator interventions (with Web Speech API fallback)
+- **Gemini Flash** — intake matching, therapist guidance suggestions, safety analysis, recap drafting
+- **Deepgram Speech-to-Text** — async onboarding and session transcription
+- **Deepgram Text-to-Speech** — available for voice support experiments in the demo
 
 ## Design Principles
 
 - **No real auth, no real DB** — this is a demo, not production
 - **Every AI call has a mock fallback** — demo works completely offline
-- **Voice-first** — onboarding uses audio recording; sessions support mic input
-- **Safety-first language** — never diagnostic, never clinical, always warm
+- **Therapist remains in charge** — AI recommends actions, but the therapist leads the session and reviews member-facing notes
+- **Voice-first intake** — onboarding uses audio recording; sessions support mic input
+- **Private journaling** — journal content is member-only in the demo

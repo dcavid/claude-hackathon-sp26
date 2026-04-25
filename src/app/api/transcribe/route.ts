@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No audio provided" }, { status: 400 });
     }
 
-    const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
+    const apiKey = process.env.DEEPGRAM_API_KEY;
 
     if (!apiKey) {
       // Mock transcription for demo
@@ -19,43 +19,33 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Google Speech-to-Text REST API
+    // Deepgram prerecorded speech-to-text API
     const audioBuffer = await audio.arrayBuffer();
-    const audioBase64 = Buffer.from(audioBuffer).toString("base64");
-
     const res = await fetch(
-      `https://speech.googleapis.com/v1/speech:recognize?key=${apiKey}`,
+      "https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true&language=en-US",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          config: {
-            encoding: "WEBM_OPUS",
-            languageCode: "en-US",
-            enableAutomaticPunctuation: true,
-            model: "latest_short",
-          },
-          audio: { content: audioBase64 },
-        }),
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          "Content-Type": audio.type || "audio/webm",
+        },
+        body: audioBuffer,
       }
     );
 
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      console.error("[transcribe] Google Speech API error:", res.status, errBody);
+      console.error("[transcribe] Deepgram API error:", res.status, errBody);
       return NextResponse.json({ transcript: getMockTranscript(), confidence: 0.9 });
     }
 
     const data = await res.json();
-    const results = data.results || [];
-    const transcript = results
-      .map((r: { alternatives?: Array<{ transcript?: string }> }) => r.alternatives?.[0]?.transcript || "")
-      .join(" ")
-      .trim();
+    const alternative = data.results?.channels?.[0]?.alternatives?.[0];
+    const transcript = alternative?.transcript?.trim?.() || "";
 
     return NextResponse.json({
       transcript: transcript || getMockTranscript(),
-      confidence: results[0]?.alternatives?.[0]?.confidence || 0.9,
+      confidence: alternative?.confidence || 0.9,
     });
   } catch {
     return NextResponse.json({

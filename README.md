@@ -1,36 +1,84 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Resonance — AI-Facilitated Peer Support Circles
 
-## Getting Started
+> Voice-first. Emotionally safe. Human.
 
-First, run the development server:
+Resonance helps people join recurring support circles where AI facilitates peer conversations — structured, warm, and built on trust.
+
+## Demo Flow
+
+1. **Landing** (`/`) — Learn about Resonance, click "Join a Circle"
+2. **Onboarding** (`/onboarding`) — Record a voice reflection or type what's on your mind. Select topics and support preferences.
+3. **Pod Match** (`/match`) — AI matches you into a support circle based on your reflection themes.
+4. **Live Session** (`/session`) — Join the live circle. Watch the demo conversation stream in. Use the right panel to:
+   - Generate a facilitator prompt
+   - Trigger the Safety Copilot
+   - React to messages ("I relate", "I hear you", "Thank you for sharing")
+5. **Summary** (`/summary`) — Post-session reflection: themes, personal takeaway, next step, next pod meeting.
+
+## Quick Start
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000 — no API keys required. The app falls back to smart mock responses.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## API Keys (Optional)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.local.example` to `.env.local` and fill in keys to enable real AI/voice:
 
-## Learn More
+```bash
+cp .env.local.example .env.local
+```
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | Gemini Flash for facilitation, safety, matching, summaries |
+| `GOOGLE_SPEECH_API_KEY` | Google Speech-to-Text for voice transcription |
+| `NEXT_PUBLIC_GOOGLE_TTS_API_KEY` | Google TTS for spoken facilitator interventions |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+All features work without keys using mock responses that look real.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Architecture
 
-## Deploy on Vercel
+```
+src/
+├── app/
+│   ├── page.tsx                  # Landing page
+│   ├── onboarding/page.tsx       # Voice onboarding
+│   ├── match/page.tsx            # Pod match
+│   ├── session/page.tsx          # Live support circle (main demo)
+│   ├── summary/page.tsx          # Post-session reflection
+│   └── api/
+│       ├── transcribe/route.ts   # Google Speech-to-Text (non-streaming)
+│       ├── match/route.ts        # Gemini pod matching
+│       ├── facilitate/route.ts   # Gemini facilitator prompts
+│       ├── safety/route.ts       # Gemini safety analysis
+│       └── summary/route.ts      # Gemini session summary
+└── lib/
+    ├── ai/
+    │   ├── facilitator.ts        # generateFacilitatorPrompt()
+    │   ├── safety.ts             # analyzeSafety()
+    │   └── summary.ts            # generateSessionSummary()
+    ├── voice/
+    │   ├── onboardingTranscription.ts  # Non-real-time transcription
+    │   ├── liveTranscription.ts        # Real-time/simulated transcription
+    │   └── textToSpeech.ts             # Spoken facilitator (Google TTS / Web Speech)
+    └── demo/
+        └── seedData.ts           # Demo participants, transcript, pod data
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Tech Stack
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Next.js 16 + TypeScript + Tailwind CSS + shadcn/ui**
+- **Gemini Flash** — facilitation, safety analysis, pod matching, session summaries
+- **Google Speech-to-Text** — async onboarding transcription
+- **Google Text-to-Speech** — spoken facilitator interventions (with Web Speech API fallback)
+
+## Design Principles
+
+- **No real auth, no real DB** — this is a demo, not production
+- **Every AI call has a mock fallback** — demo works completely offline
+- **Voice-first** — onboarding uses audio recording; sessions support mic input
+- **Safety-first language** — never diagnostic, never clinical, always warm

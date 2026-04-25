@@ -28,6 +28,19 @@ const SUPPORT_PREFS = [
 
 type RecordingState = "idle" | "recording" | "recorded" | "transcribing";
 
+type PodOption = {
+  id: string;
+  name: string;
+  description: string;
+  sharedThemes: string[];
+  memberCount: number;
+  meetingType: string;
+  nextSession: string;
+  chatDescription: string;
+  fitReason: string;
+  fitScore: number;
+};
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
@@ -104,11 +117,18 @@ export default function OnboardingPage() {
       });
       const data = await res.json();
       const themes = data.themes || selectedTopics;
+      const podOptions = Array.isArray(data.podOptions) ? data.podOptions : [];
+      const recommendedPod = data.recommendedPod || podOptions[0] || null;
       // Pass context to session page via sessionStorage
       const themeString = [...themes, ...selectedTopics].join(", ");
-      sessionStorage.setItem("resonance_theme", themeString || "imposter syndrome and self-worth");
+      sessionStorage.setItem("resonance_theme", themeString || "support, grief, and life transitions");
       sessionStorage.setItem("resonance_transcript", transcript || "");
-      router.push(`/match?themes=${encodeURIComponent(JSON.stringify(themes))}`);
+      sessionStorage.setItem("resonance_match_themes", JSON.stringify(themes));
+      sessionStorage.setItem("resonance_match_pods", JSON.stringify(podOptions));
+      if (recommendedPod) {
+        sessionStorage.setItem("resonance_selected_pod", JSON.stringify(recommendedPod as PodOption));
+      }
+      router.push("/match");
     } catch {
       router.push("/match");
     }

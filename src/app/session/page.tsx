@@ -36,6 +36,19 @@ type SafetyRecommendation = {
   resources: string[];
 };
 
+type SelectedPod = {
+  id: string;
+  name: string;
+  description: string;
+  sharedThemes: string[];
+  memberCount: number;
+  meetingType: string;
+  nextSession: string;
+  chatDescription: string;
+  fitReason: string;
+  fitScore: number;
+};
+
 const REACTIONS = ["I relate", "I hear you", "Thank you for sharing"];
 
 const PARTICIPANT_COLORS: Record<string, string> = {
@@ -47,17 +60,47 @@ const PARTICIPANT_COLORS: Record<string, string> = {
   therapist: "bg-slate-200 text-slate-800",
 };
 
-const SESSION_THEME =
-  typeof window !== "undefined"
-    ? sessionStorage.getItem("resonance_theme") || "burnout, loneliness, and life transitions"
-    : "burnout, loneliness, and life transitions";
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 export default function SessionPage() {
   const router = useRouter();
+  const [selectedPod] = useState<SelectedPod>(() => {
+    if (typeof window === "undefined") {
+      return {
+        id: "career-burnout-pod",
+        name: DEMO_POD.name,
+        description: DEMO_POD.description,
+        sharedThemes: DEMO_POD.sharedThemes,
+        memberCount: DEMO_POD.memberCount,
+        meetingType: DEMO_POD.meetingType,
+        nextSession: DEMO_POD.nextSession,
+        chatDescription: DEMO_POD.chatDescription,
+        fitReason: "",
+        fitScore: 0.82,
+      };
+    }
+
+    try {
+      const stored = window.sessionStorage.getItem("resonance_selected_pod");
+      if (!stored) throw new Error("missing");
+      return JSON.parse(stored) as SelectedPod;
+    } catch {
+      return {
+        id: "career-burnout-pod",
+        name: DEMO_POD.name,
+        description: DEMO_POD.description,
+        sharedThemes: DEMO_POD.sharedThemes,
+        memberCount: DEMO_POD.memberCount,
+        meetingType: DEMO_POD.meetingType,
+        nextSession: DEMO_POD.nextSession,
+        chatDescription: DEMO_POD.chatDescription,
+        fitReason: "",
+        fitScore: 0.82,
+      };
+    }
+  });
   const [phase, setPhase] = useState<Phase>("waiting");
   const [messages, setMessages] = useState<Message[]>([]);
   const [typingBot, setTypingBot] = useState<string | null>(null);
@@ -111,21 +154,21 @@ export default function SessionPage() {
     });
   }, [pushMessage]);
 
-  const fetchBotCheckin = async (participantId: string): Promise<string> => {
+  const fetchBotCheckin = useCallback(async (participantId: string): Promise<string> => {
     try {
       const res = await fetch("/api/bot-response", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ personaId: participantId, type: "checkin", sessionTheme: SESSION_THEME }),
+        body: JSON.stringify({ personaId: participantId, type: "checkin", sessionTheme: selectedPod.sharedThemes.join(", ") }),
       });
       const data = await res.json();
       return data.response || "I'm glad to be here today.";
     } catch {
       return "I'm glad to be here today.";
     }
-  };
+  }, [selectedPod.sharedThemes]);
 
-  const fetchBotResponse = async (
+  const fetchBotResponse = useCallback(async (
     participantId: string,
     history: Array<{ name: string; text: string }>,
     latestMessage: { name: string; text: string }
@@ -146,7 +189,7 @@ export default function SessionPage() {
     } catch {
       return "I hear you.";
     }
-  };
+  }, []);
 
   const getParticipationSnapshot = useCallback((current: Message[]) => {
     const memberMessages = current.filter((message) => message.role === "member");
@@ -284,7 +327,7 @@ export default function SessionPage() {
       "Thank you. I’m hearing burnout, isolation, and pressure to keep performing. Let’s stay with those themes and make sure each person gets room to be specific."
     );
     setPhase("live");
-  }, [addMemberMessage, addTherapistMessage]);
+  }, [addMemberMessage, addTherapistMessage, fetchBotCheckin]);
 
   const queueBotReplies = useCallback(async (userText: string, historySnapshot: Message[]) => {
     const history = historySnapshot.map((message) => ({ name: message.participantName, text: message.text }));
@@ -304,7 +347,7 @@ export default function SessionPage() {
       addMemberMessage(participant.id, participant.name, response);
       await sleep(400);
     }
-  }, [addMemberMessage]);
+  }, [addMemberMessage, fetchBotResponse]);
 
   const handleSend = useCallback(async () => {
     if (!typedMessage.trim() || phase !== "live") return;
@@ -399,7 +442,7 @@ export default function SessionPage() {
             <Heart className="w-4 h-4 text-primary" />
           </div>
           <div>
-            <span className="font-semibold text-foreground">{DEMO_POD.name}</span>
+            <span className="font-semibold text-foreground">{selectedPod.name}</span>
             <div className="flex items-center gap-2 mt-0.5">
               <Badge variant="secondary" className="text-xs">{DEMO_THERAPIST.name}</Badge>
               {phase === "live" && (
@@ -456,7 +499,7 @@ export default function SessionPage() {
           <Card className="mt-2 bg-muted/40">
             <CardContent className="p-3">
               <p className="text-xs font-medium text-foreground mb-1">Between sessions</p>
-              <p className="text-xs text-muted-foreground">{DEMO_POD.chatDescription}</p>
+              <p className="text-xs text-muted-foreground">{selectedPod.chatDescription}</p>
             </CardContent>
           </Card>
         </div>

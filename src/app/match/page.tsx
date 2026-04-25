@@ -234,11 +234,11 @@ function MatchContent() {
               className="w-full gap-2 text-base py-6"
               onClick={() => router.push("/session")}
             >
-              Enter Pod Workspace
+              Open Main App
               <ArrowRight className="w-4 h-4" />
             </Button>
             <p className="text-center text-xs text-muted-foreground">
-              Your selected pod will carry into the demo session workspace
+              Your selected pod will carry into the main app UI and become your primary group
             </p>
           </div>
         </div>

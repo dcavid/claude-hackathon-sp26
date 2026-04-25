@@ -70,3 +70,123 @@ export const DEMO_JOURNAL_PROMPTS = [
   "What kind of support did you want during the session that you did not ask for?",
   "What would feeling 10% more supported this week actually look like?",
 ];
+
+export const DEMO_ACTIVE_GROUPS = [
+  {
+    id: "pet-loss-pod",
+    name: "Pet Loss and Grief Pod",
+    subgroup: "Grief and bereavement",
+    memberCount: 5,
+    nextSession: "Tuesday, 6:30 PM ET",
+    chatPreview: "Several members are talking about how routines change after losing a pet.",
+  },
+  {
+    id: "life-after-loss",
+    name: "Life After Loss Pod",
+    subgroup: "Identity after loss",
+    memberCount: 4,
+    nextSession: "Thursday, 7:30 PM ET",
+    chatPreview: "A quieter group focused on rebuilding rhythm, home life, and connection.",
+  },
+  {
+    id: "helpers-circle",
+    name: "Helpers and Caregivers Pod",
+    subgroup: "Supporters and overfunctioners",
+    memberCount: 6,
+    nextSession: "Sunday, 5:00 PM ET",
+    chatPreview: "Members are reflecting on what happens when they always take care of everyone else first.",
+  },
+];
+
+export const DEMO_GROUP_CHAT = [
+  {
+    id: "m1",
+    author: "Maya",
+    role: "member",
+    text: "I kept expecting to hear my dog at the door today. That part caught me off guard.",
+    time: "2:14 PM",
+  },
+  {
+    id: "m2",
+    author: "Priya",
+    role: "member",
+    text: "That makes sense. The routine pieces have been some of the hardest parts for me too.",
+    time: "2:16 PM",
+  },
+  {
+    id: "m3",
+    author: "Dr. Elena Park",
+    role: "therapist",
+    text: "If it helps, bring one small moment like that into Tuesday's session. We can start there.",
+    time: "2:20 PM",
+  },
+];
+
+export const DEMO_UPCOMING_SESSIONS = [
+  {
+    id: "u1",
+    dateTime: "Tuesday, April 28 at 6:30 PM ET",
+    groupName: "Pet Loss and Grief Pod",
+    therapistName: "Dr. Elena Park",
+    promptPlaceholder: "What would you like to talk about today?",
+  },
+  {
+    id: "u2",
+    dateTime: "Thursday, May 1 at 7:30 PM ET",
+    groupName: "Life After Loss Pod",
+    therapistName: "Dr. Elena Park",
+    promptPlaceholder: "What feels most present for you going into this session?",
+  },
+];
+
+export const DEMO_HISTORY = [
+  {
+    id: "h1",
+    sessionDate: "April 21, 2026",
+    groupName: "Pet Loss and Grief Pod",
+    mainTopics: ["Routines after loss", "Guilt", "Unexpected grief triggers"],
+    emotionalTone: "Tender, heavy, connected",
+    keyTakeaways: "Members felt less alone after naming how grief shows up in small, daily moments.",
+    personalReflection: "You shared a memory tied to your dog’s morning routine and stayed present through the group response.",
+  },
+  {
+    id: "h2",
+    sessionDate: "April 14, 2026",
+    groupName: "Life After Loss Pod",
+    mainTopics: ["Loneliness", "Home feeling different", "Social withdrawal"],
+    emotionalTone: "Reflective, gentle, validating",
+    keyTakeaways: "The group connected around how grief changes identity and ordinary spaces.",
+    personalReflection: "You were quieter early on but became more specific once another member described losing structure at home.",
+  },
+];
+
+export const DEMO_INSIGHTS = {
+  recurringThemes: [
+    "Grief shows up most strongly in routines and quiet transitions",
+    "You often minimize your own pain until someone else names something similar",
+    "Isolation tends to spike in the evenings",
+  ],
+  emotionalTrends: [
+    { label: "Three sessions ago", value: "Guarded and hesitant" },
+    { label: "Two sessions ago", value: "More open, but still cautious" },
+    { label: "This session", value: "More direct and emotionally specific" },
+  ],
+  participationChanges: [
+    "You have started speaking earlier in the session instead of waiting until the end.",
+    "You now respond to other members more often, not just to the therapist prompt.",
+  ],
+  behavioralShifts: [
+    "You are naming grief triggers closer to when they happen.",
+    "You are more willing to talk about support needs instead of only describing coping alone.",
+  ],
+  headline: "You’ve become more comfortable sharing over the past 3 sessions.",
+};
+
+export const DEMO_PROFILE = {
+  role: "Both support seeker and helper",
+  communicationPreference: "Listening, reflection, and gentle advice",
+  privacyPreference: "Display first name only in pod chat",
+  preferredGroupSize: "4-6 people",
+  topicsOfInterest: ["Grief", "Loneliness", "Life transitions"],
+  notifications: ["Session reminders", "Chat mentions", "Recap availability"],
+};

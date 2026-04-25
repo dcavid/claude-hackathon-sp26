@@ -1,42 +1,29 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Heart, Mic, Square, Sparkles, Shield, LogOut, Send, AlertCircle, ClipboardList, Users,
+  ArrowRight, BookOpen, Bot, Brain, Calendar, Check, ChevronRight, Clock, Heart, Home,
+  LineChart, Lock, MessageCircle, NotebookPen, Settings2, Sparkles, UserRound, Users,
 } from "lucide-react";
-import { DEMO_PARTICIPANTS, DEMO_POD, DEMO_THERAPIST } from "@/lib/demo/seedData";
+import {
+  DEMO_ACTIVE_GROUPS,
+  DEMO_GROUP_CHAT,
+  DEMO_HISTORY,
+  DEMO_INSIGHTS,
+  DEMO_JOURNAL_PROMPTS,
+  DEMO_POD,
+  DEMO_PROFILE,
+  DEMO_THERAPIST,
+} from "@/lib/demo/seedData";
 
-type Message = {
-  id: string;
-  participantId: string;
-  participantName: string;
-  role: "member" | "therapist";
-  text: string;
-  timestamp: string;
-  reactions: Record<string, number>;
-};
+type TabId = "groups" | "upcoming" | "history" | "insights" | "journal" | "profile";
 
-type Phase = "waiting" | "checkin" | "live" | "ended";
-
-type CopilotRecommendation = {
-  prompt: string;
-  rationale: string;
-  quietParticipants: string[];
-  dominantSpeaker?: string | null;
-};
-
-type SafetyRecommendation = {
-  riskLevel: "low" | "medium" | "high";
-  response: string;
-  resources: string[];
-};
-
-type SelectedPod = {
+type PodOption = {
   id: string;
   name: string;
   description: string;
@@ -49,24 +36,58 @@ type SelectedPod = {
   fitScore: number;
 };
 
-const REACTIONS = ["I relate", "I hear you", "Thank you for sharing"];
-
-const PARTICIPANT_COLORS: Record<string, string> = {
-  david: "bg-blue-100 text-blue-700",
-  maya: "bg-purple-100 text-purple-700",
-  jordan: "bg-amber-100 text-amber-700",
-  priya: "bg-rose-100 text-rose-700",
-  alex: "bg-teal-100 text-teal-700",
-  therapist: "bg-slate-200 text-slate-800",
+type ProfileState = {
+  lifeChallenge: string;
+  topics: string[];
+  supportPreferences: string[];
+  privacyPreference: string;
+  preferredGroupSize: string;
+  rolePreference: string;
+  communicationStyle: string[];
 };
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+type ChatMessage = {
+  id: string;
+  author: string;
+  role: string;
+  text: string;
+  time: string;
+};
+
+const NAV_ITEMS: Array<{ id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { id: "groups", label: "Groups", icon: Home },
+  { id: "upcoming", label: "Upcoming", icon: Calendar },
+  { id: "history", label: "History", icon: BookOpen },
+  { id: "insights", label: "Insights", icon: Brain },
+  { id: "journal", label: "Journal", icon: NotebookPen },
+  { id: "profile", label: "Profile", icon: UserRound },
+];
+
+const JOURNAL_KEY = "resonance_private_journal";
 
 export default function SessionPage() {
   const router = useRouter();
-  const [selectedPod] = useState<SelectedPod>(() => {
+  const [selectedTab, setSelectedTab] = useState<TabId>("groups");
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(() => {
+    if (typeof window === "undefined") return "pet-loss-pod";
+    try {
+      const stored = window.sessionStorage.getItem("resonance_selected_pod");
+      return stored ? (JSON.parse(stored) as PodOption).id : "pet-loss-pod";
+    } catch {
+      return "pet-loss-pod";
+    }
+  });
+  const [journalEntry, setJournalEntry] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return window.sessionStorage.getItem(JOURNAL_KEY) || "";
+  });
+  const [journalSaved, setJournalSaved] = useState(false);
+  const [aiReflection, setAiReflection] = useState("");
+  const [sessionPrompts, setSessionPrompts] = useState<Record<string, string>>({});
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(DEMO_GROUP_CHAT);
+  const [chatInput, setChatInput] = useState("");
+
+  const selectedPod = useMemo<PodOption>(() => {
     if (typeof window === "undefined") {
       return {
         id: "career-burnout-pod",
@@ -85,7 +106,7 @@ export default function SessionPage() {
     try {
       const stored = window.sessionStorage.getItem("resonance_selected_pod");
       if (!stored) throw new Error("missing");
-      return JSON.parse(stored) as SelectedPod;
+      return JSON.parse(stored) as PodOption;
     } catch {
       return {
         id: "career-burnout-pod",
@@ -100,714 +121,541 @@ export default function SessionPage() {
         fitScore: 0.82,
       };
     }
-  });
-  const [phase, setPhase] = useState<Phase>("waiting");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [typingBot, setTypingBot] = useState<string | null>(null);
-  const [typedMessage, setTypedMessage] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [copilotLoading, setCopilotLoading] = useState(false);
-  const [copilotSuggestion, setCopilotSuggestion] = useState<CopilotRecommendation | null>(null);
-  const [safetyRecommendation, setSafetyRecommendation] = useState<SafetyRecommendation | null>(null);
-  const [userMessageCount, setUserMessageCount] = useState(0);
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const messagesRef = useRef<Message[]>([]);
-  const abortRef = useRef(false);
-
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, typingBot]);
-
-  const pushMessage = useCallback((msg: Message) => {
-    setMessages((prev) => [...prev, msg]);
   }, []);
 
-  const addTherapistMessage = useCallback((text: string) => {
-    pushMessage({
-      id: uid(),
-      participantId: DEMO_THERAPIST.id,
-      participantName: DEMO_THERAPIST.name,
-      role: "therapist",
-      text,
-      timestamp: now(),
-      reactions: {},
-    });
-  }, [pushMessage]);
-
-  const addMemberMessage = useCallback((participantId: string, name: string, text: string) => {
-    pushMessage({
-      id: uid(),
-      participantId,
-      participantName: name,
-      role: "member",
-      text,
-      timestamp: now(),
-      reactions: {},
-    });
-  }, [pushMessage]);
-
-  const fetchBotCheckin = useCallback(async (participantId: string): Promise<string> => {
-    try {
-      const res = await fetch("/api/bot-response", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ personaId: participantId, type: "checkin", sessionTheme: selectedPod.sharedThemes.join(", ") }),
-      });
-      const data = await res.json();
-      return data.response || "I'm glad to be here today.";
-    } catch {
-      return "I'm glad to be here today.";
-    }
-  }, [selectedPod.sharedThemes]);
-
-  const fetchBotResponse = useCallback(async (
-    participantId: string,
-    history: Array<{ name: string; text: string }>,
-    latestMessage: { name: string; text: string }
-  ): Promise<string> => {
-    try {
-      const res = await fetch("/api/bot-response", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          personaId: participantId,
-          type: "response",
-          conversationHistory: history,
-          latestMessage,
-        }),
-      });
-      const data = await res.json();
-      return data.response || "I hear you.";
-    } catch {
-      return "I hear you.";
-    }
-  }, []);
-
-  const getParticipationSnapshot = useCallback((current: Message[]) => {
-    const memberMessages = current.filter((message) => message.role === "member");
-    const counts = new Map<string, number>();
-
-    for (const message of memberMessages) {
-      counts.set(message.participantName, (counts.get(message.participantName) || 0) + 1);
-    }
-
-    const quietParticipants = DEMO_PARTICIPANTS
-      .filter((participant) => (counts.get(participant.name) || 0) <= 1)
-      .map((participant) => participant.name);
-
-    let dominantSpeaker: string | null = null;
-    let dominantCount = 0;
-
-    counts.forEach((count, name) => {
-      if (count > dominantCount) {
-        dominantSpeaker = name;
-        dominantCount = count;
-      }
-    });
-
-    return {
-      quietParticipants,
-      dominantSpeaker: dominantCount >= 3 ? dominantSpeaker : null,
-    };
-  }, []);
-
-  const triggerCopilot = useCallback(async () => {
-    if (copilotLoading || phase !== "live") return;
-    setCopilotLoading(true);
-
-    const current = messagesRef.current;
-    const transcript = current.map((message) => `${message.participantName}: ${message.text}`).join("\n");
-    const participation = getParticipationSnapshot(current);
-
-    try {
-      const res = await fetch("/api/facilitate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript,
-          sessionPhase: "live",
-          quietParticipants: participation.quietParticipants,
-          participantCount: DEMO_PARTICIPANTS.length + 1,
-        }),
-      });
-      const data = await res.json();
-      const prompt = data.prompt || "Let's pause and hear from someone who hasn't had much space yet.";
-      setCopilotSuggestion({
-        prompt,
-        rationale: participation.dominantSpeaker
-          ? `${participation.dominantSpeaker} has been carrying more of the airtime. Invite another voice in without shutting anyone down.`
-          : "The group has enough emotional material on the table for a structured follow-up question.",
-        quietParticipants: participation.quietParticipants,
-        dominantSpeaker: participation.dominantSpeaker,
-      });
-    } catch {
-      setCopilotSuggestion({
-        prompt: "Let's slow this down for a moment. Who hasn't had a chance to speak yet and wants to name what's most present right now?",
-        rationale: "Fallback recommendation when Gemini is unavailable.",
-        quietParticipants: participation.quietParticipants,
-        dominantSpeaker: participation.dominantSpeaker,
-      });
-    } finally {
-      setCopilotLoading(false);
-    }
-  }, [copilotLoading, getParticipationSnapshot, phase]);
-
-  const useCopilotSuggestion = useCallback(() => {
-    if (!copilotSuggestion) return;
-    addTherapistMessage(copilotSuggestion.prompt);
-    setCopilotSuggestion(null);
-  }, [addTherapistMessage, copilotSuggestion]);
-
-  const checkSafety = useCallback(async (text: string) => {
-    try {
-      const res = await fetch("/api/safety", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      });
-      const data = await res.json();
-      if ((data.riskLevel === "high" || data.riskLevel === "medium") && data.response) {
-        setSafetyRecommendation({
-          riskLevel: data.riskLevel,
-          response: data.response,
-          resources: data.resources || [],
-        });
-      }
-    } catch {
-      // Ignore transient demo errors and keep the session moving.
-    }
-  }, []);
-
-  const useSafetyResponse = useCallback(() => {
-    if (!safetyRecommendation) return;
-    addTherapistMessage(safetyRecommendation.response);
-    setSafetyRecommendation(null);
-  }, [addTherapistMessage, safetyRecommendation]);
-
-  const triggerSafetyAlert = useCallback(async () => {
-    const triggerText = "I feel completely trapped lately. I don't know how much longer I can keep pretending I'm okay.";
-    addMemberMessage("david", "David", triggerText);
-    await sleep(800);
-    await checkSafety(triggerText);
-  }, [addMemberMessage, checkSafety]);
-
-  const startCheckin = useCallback(async () => {
-    abortRef.current = false;
-    setPhase("checkin");
-
-    addTherapistMessage(
-      "Welcome back, everyone. This pod is a structured space for support, and I'll help guide us through check-in before we open up the broader conversation."
-    );
-
-    await sleep(1500);
-
-    for (const participant of DEMO_PARTICIPANTS) {
-      if (abortRef.current) return;
-      setTypingBot(participant.id);
-      const checkin = await fetchBotCheckin(participant.id);
-      await sleep(900 + Math.random() * 500);
-      if (abortRef.current) return;
-      setTypingBot(null);
-      addMemberMessage(participant.id, participant.name, checkin);
-      await sleep(500);
-    }
-
-    await sleep(1000);
-    if (abortRef.current) return;
-
-    addTherapistMessage(
-      "Thank you. I’m hearing burnout, isolation, and pressure to keep performing. Let’s stay with those themes and make sure each person gets room to be specific."
-    );
-    setPhase("live");
-  }, [addMemberMessage, addTherapistMessage, fetchBotCheckin]);
-
-  const queueBotReplies = useCallback(async (userText: string, historySnapshot: Message[]) => {
-    const history = historySnapshot.map((message) => ({ name: message.participantName, text: message.text }));
-    const latestMessage = { name: "You", text: userText };
-
-    const shuffled = [...DEMO_PARTICIPANTS].sort(() => Math.random() - 0.5);
-    const respondingBots = shuffled.slice(0, Math.random() > 0.4 ? 3 : 2);
-
-    for (const participant of respondingBots) {
-      if (abortRef.current) return;
-      await sleep(1200 + Math.random() * 800);
-      setTypingBot(participant.id);
-      const response = await fetchBotResponse(participant.id, history, latestMessage);
-      await sleep(800 + Math.random() * 500);
-      if (abortRef.current) return;
-      setTypingBot(null);
-      addMemberMessage(participant.id, participant.name, response);
-      await sleep(400);
-    }
-  }, [addMemberMessage, fetchBotResponse]);
-
-  const handleSend = useCallback(async () => {
-    if (!typedMessage.trim() || phase !== "live") return;
-    const text = typedMessage.trim();
-    setTypedMessage("");
-
-    const userMsg: Message = {
-      id: uid(),
-      participantId: "you",
-      participantName: "You",
-      role: "member",
-      text,
-      timestamp: now(),
-      reactions: {},
-    };
-    pushMessage(userMsg);
-
-    const nextCount = userMessageCount + 1;
-    setUserMessageCount(nextCount);
-
-    checkSafety(text);
-
-    const snapshot = [...messagesRef.current, userMsg];
-    queueBotReplies(text, snapshot);
-
-    if (nextCount % 2 === 0) {
-      setTimeout(() => triggerCopilot(), 4500);
-    }
-  }, [checkSafety, phase, pushMessage, queueBotReplies, triggerCopilot, typedMessage, userMessageCount]);
-
-  const toggleMic = useCallback(async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
+  const onboardingProfile = useMemo<ProfileState>(() => {
+    if (typeof window === "undefined") {
+      return {
+        lifeChallenge: "Grief",
+        topics: DEMO_PROFILE.topicsOfInterest,
+        supportPreferences: ["Structured support", "Support between sessions"],
+        privacyPreference: DEMO_PROFILE.privacyPreference,
+        preferredGroupSize: DEMO_PROFILE.preferredGroupSize,
+        rolePreference: DEMO_PROFILE.role,
+        communicationStyle: ["Listening", "Reflection"],
       };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        try {
-          const fd = new FormData();
-          fd.append("audio", new Blob(chunks, { type: "audio/webm" }), "message.webm");
-          const res = await fetch("/api/transcribe", { method: "POST", body: fd });
-          const data = await res.json();
-          if (data.transcript) setTypedMessage(data.transcript);
-        } catch {
-          // Silent fallback for the demo flow.
-        }
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setIsRecording(true);
-    } catch {
-      // Mic access is optional in the demo.
     }
-  }, [isRecording]);
 
-  const addReaction = useCallback((messageId: string, reaction: string) => {
-    setMessages((prev) =>
-      prev.map((message) =>
-        message.id === messageId
-          ? { ...message, reactions: { ...message.reactions, [reaction]: (message.reactions[reaction] || 0) + 1 } }
-          : message
-      )
-    );
+    try {
+      const stored = window.sessionStorage.getItem("resonance_onboarding_profile");
+      if (!stored) throw new Error("missing");
+      return JSON.parse(stored) as ProfileState;
+    } catch {
+      return {
+        lifeChallenge: "Grief",
+        topics: DEMO_PROFILE.topicsOfInterest,
+        supportPreferences: ["Structured support", "Support between sessions"],
+        privacyPreference: DEMO_PROFILE.privacyPreference,
+        preferredGroupSize: DEMO_PROFILE.preferredGroupSize,
+        rolePreference: DEMO_PROFILE.role,
+        communicationStyle: ["Listening", "Reflection"],
+      };
+    }
   }, []);
 
-  const endSession = useCallback(() => {
-    abortRef.current = true;
-    setPhase("ended");
-    const transcript = messagesRef.current
-      .map((message) => `${message.participantName}: ${message.text}`)
-      .join("\n");
-    sessionStorage.setItem("resonance_transcript", transcript);
-    setTimeout(() => router.push("/summary"), 1200);
-  }, [router]);
+  const activeGroups = useMemo(() => {
+    const selectedGroup = {
+      id: selectedPod.id,
+      name: selectedPod.name,
+      subgroup: onboardingProfile.lifeChallenge,
+      memberCount: selectedPod.memberCount,
+      nextSession: selectedPod.nextSession,
+      chatPreview: selectedPod.chatDescription,
+    };
 
-  const participationSnapshot = getParticipationSnapshot(messages);
+    const others = DEMO_ACTIVE_GROUPS.filter((group) => group.id !== selectedGroup.id);
+    return [selectedGroup, ...others];
+  }, [onboardingProfile.lifeChallenge, selectedPod]);
 
-  return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            <Heart className="w-4 h-4 text-primary" />
-          </div>
-          <div>
-            <span className="font-semibold text-foreground">{selectedPod.name}</span>
-            <div className="flex items-center gap-2 mt-0.5">
-              <Badge variant="secondary" className="text-xs">{DEMO_THERAPIST.name}</Badge>
-              {phase === "live" && (
-                <Badge variant="destructive" className="text-xs px-2 py-0 gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse inline-block" />
-                  Weekly session live
-                </Badge>
-              )}
-              {phase === "waiting" && <Badge variant="outline" className="text-xs">Pod chat open</Badge>}
-              {phase === "checkin" && <Badge variant="outline" className="text-xs">Check-in</Badge>}
-              {phase === "ended" && <Badge className="text-xs bg-green-600">Therapist review next</Badge>}
+  const selectedGroup = activeGroups.find((group) => group.id === selectedGroupId) || activeGroups[0];
+
+  const saveJournal = () => {
+    window.sessionStorage.setItem(JOURNAL_KEY, journalEntry);
+    setJournalSaved(true);
+    window.setTimeout(() => setJournalSaved(false), 1600);
+  };
+
+  const generateAiReflection = () => {
+    setAiReflection(
+      "AI reflection: there is a strong pattern of grief surfacing through ordinary routines, and you seem more willing to name the emotional weight directly than you were earlier in the demo."
+    );
+  };
+
+  const sendChatMessage = () => {
+    if (!chatInput.trim()) return;
+    const nextMessage: ChatMessage = {
+      id: `${Date.now()}`,
+      author: "You",
+      role: "member",
+      text: chatInput.trim(),
+      time: "Just now",
+    };
+    setChatMessages((prev) => [...prev, nextMessage]);
+    setChatInput("");
+  };
+
+  const renderGroups = () => (
+    <div className="space-y-5">
+      <Card className="rounded-3xl border border-border/70 bg-white/85 shadow-[0_20px_70px_-35px_rgba(90,67,45,0.28)]">
+        <CardContent className="p-6 md:p-7">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <Badge variant="secondary" className="mb-3 text-xs">Home</Badge>
+              <h2 className="text-3xl font-bold text-foreground mb-2">Your active support groups</h2>
+              <p className="text-muted-foreground max-w-2xl">
+                Small peer-support spaces stay active between therapist-led sessions so support does not disappear after the call ends.
+              </p>
             </div>
+            <Button className="gap-2 rounded-2xl">
+              <Users className="w-4 h-4" />
+              Join New Group
+            </Button>
           </div>
-        </div>
-        <Button variant="ghost" size="sm" onClick={endSession} className="gap-1.5 text-muted-foreground">
-          <LogOut className="w-4 h-4" />
-          End
-        </Button>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4">
+        {activeGroups.map((group) => (
+          <Card key={group.id} className={`rounded-3xl border shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)] ${selectedGroup.id === group.id ? "border-primary/40 bg-primary/5" : "border-border/70 bg-white/85"}`}>
+            <CardContent className="p-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    {selectedGroup.id === group.id && <Badge variant="secondary" className="text-xs">Current group</Badge>}
+                    <Badge variant="outline" className="text-xs">{group.subgroup}</Badge>
+                  </div>
+                  <h3 className="text-2xl font-bold text-foreground mb-2">{group.name}</h3>
+                  <p className="text-sm text-muted-foreground max-w-xl">{group.chatPreview}</p>
+                </div>
+                <div className="grid grid-cols-3 gap-3 min-w-full lg:min-w-[300px] lg:max-w-[340px]">
+                  <MiniStat label="Members" value={`${group.memberCount}`} icon={<Users className="w-4 h-4" />} />
+                  <MiniStat label="Subtype" value={group.subgroup} icon={<Sparkles className="w-4 h-4" />} />
+                  <MiniStat label="Next" value={group.nextSession} icon={<Clock className="w-4 h-4" />} />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3 mt-5">
+                <Button
+                  variant="outline"
+                  className="gap-2 rounded-2xl"
+                  onClick={() => {
+                    setSelectedGroupId(group.id);
+                    router.push(`/groups/${group.id}`);
+                  }}
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Open Group Chat
+                </Button>
+                <Button variant="ghost" className="gap-2 rounded-2xl" onClick={() => setSelectedGroupId(group.id)}>
+                  <ChevronRight className="w-4 h-4" />
+                  View Group Details
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-56 border-r border-border/50 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pod roster</p>
-          <div className="rounded-xl border border-border/70 bg-card p-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold bg-slate-200 text-slate-800">
-                {DEMO_THERAPIST.initial}
-              </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">{DEMO_THERAPIST.name}</p>
-                <p className="text-xs text-muted-foreground">{DEMO_THERAPIST.title}</p>
-              </div>
+      <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+        <CardContent className="p-6 md:p-7">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Between sessions</p>
+              <h3 className="text-xl font-semibold text-foreground mt-1">{selectedGroup.name} chat</h3>
             </div>
+            <Badge variant="secondary" className="text-xs">Therapist supported</Badge>
           </div>
-          {DEMO_PARTICIPANTS.map((participant) => (
-            <div key={participant.id} className="flex items-center gap-2.5">
-              <div className={`relative w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${PARTICIPANT_COLORS[participant.id]}`}>
-                {participant.initial}
-                {typingBot === participant.id && (
-                  <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-background animate-pulse" />
-                )}
-              </div>
-              <span className="text-sm text-foreground">{participant.name}</span>
-            </div>
-          ))}
-          <Separator className="my-2" />
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-sm font-semibold text-primary">
-              Y
-            </div>
-            <span className="text-sm font-medium text-foreground">You</span>
-            <Badge variant="outline" className="text-xs ml-auto">private journal enabled</Badge>
-          </div>
-          <Card className="mt-2 bg-muted/40">
-            <CardContent className="p-3">
-              <p className="text-xs font-medium text-foreground mb-1">Between sessions</p>
-              <p className="text-xs text-muted-foreground">{selectedPod.chatDescription}</p>
-            </CardContent>
-          </Card>
-        </div>
 
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 p-5 space-y-4">
-            {phase === "waiting" && (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-5">
-                  <Users className="w-7 h-7 text-primary" />
+          <div className="space-y-3 mb-4">
+            {chatMessages.map((message) => (
+              <div key={message.id} className={`rounded-2xl border p-4 ${message.author === "You" ? "bg-primary text-primary-foreground border-primary/10 ml-8" : "bg-card border-border/70 mr-8"}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium">{message.author}</span>
+                  <span className={`text-[11px] ${message.author === "You" ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{message.time}</span>
                 </div>
-                <h2 className="font-semibold text-foreground mb-2">Your pod workspace is ready</h2>
-                <p className="text-sm text-muted-foreground mb-6 max-w-sm">
-                  The private pod chat stays open between sessions. Start the therapist-led meeting when you are ready to run check-in.
-                </p>
-                <Button onClick={startCheckin} className="gap-2">
-                  <Sparkles className="w-4 h-4" />
-                  Start Weekly Session
-                </Button>
+                <p className="text-sm leading-relaxed">{message.text}</p>
               </div>
-            )}
-
-            {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} onReact={addReaction} />
             ))}
-
-            {typingBot && (
-              <TypingIndicator
-                participantId={typingBot}
-                name={DEMO_PARTICIPANTS.find((participant) => participant.id === typingBot)?.name || ""}
-                initial={DEMO_PARTICIPANTS.find((participant) => participant.id === typingBot)?.initial || "?"}
-              />
-            )}
-
-            {phase === "ended" && (
-              <div className="text-center py-10">
-                <p className="text-sm text-muted-foreground">
-                  Session complete. AI notes are moving into therapist review before the member recap is released.
-                </p>
-              </div>
-            )}
           </div>
 
-          {phase === "live" && (
-            <div className="border-t border-border/50 p-4 shrink-0">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={toggleMic}
-                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                    isRecording ? "bg-red-500 text-white" : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {isRecording ? <Square className="w-3.5 h-3.5 fill-current" /> : <Mic className="w-3.5 h-3.5" />}
-                </button>
-                <input
-                  className="flex-1 bg-muted/50 rounded-xl px-4 py-2.5 text-sm outline-none border border-transparent focus:border-primary/30 placeholder:text-muted-foreground"
-                  placeholder="Share something with the pod..."
-                  value={typedMessage}
-                  onChange={(event) => setTypedMessage(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      handleSend();
-                    }
-                  }}
+          <div className="flex gap-3">
+            <Textarea
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              placeholder="Share a thought with your group between sessions..."
+              className="min-h-[88px] rounded-2xl bg-background/70"
+            />
+            <Button className="self-end rounded-2xl" onClick={sendChatMessage}>
+              Send
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderUpcoming = () => {
+    const sessions = [
+      {
+        id: "next-main",
+        dateTime: selectedPod.nextSession,
+        groupName: selectedPod.name,
+        therapistName: DEMO_THERAPIST.name,
+        promptPlaceholder: "What would you like to talk about today?",
+      },
+      ...DEMO_ACTIVE_GROUPS.slice(0, 1).map((group) => ({
+        id: group.id,
+        dateTime: group.nextSession,
+        groupName: group.name,
+        therapistName: DEMO_THERAPIST.name,
+        promptPlaceholder: "What feels most present for you going into this session?",
+      })),
+    ];
+
+    if (sessions.length === 0) {
+      return (
+        <Card className="rounded-3xl border border-dashed border-border/80 bg-white/85">
+          <CardContent className="p-10 text-center">
+            <Calendar className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-foreground mb-2">No sessions scheduled</h3>
+            <p className="text-sm text-muted-foreground">When a therapist-led session is scheduled, it will appear here with a pre-session prompt.</p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {sessions.map((session) => (
+          <Card key={session.id} className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+            <CardContent className="p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <Badge variant="secondary" className="mb-3 text-xs">Upcoming session</Badge>
+                  <h3 className="text-2xl font-bold text-foreground mb-2">{session.groupName}</h3>
+                  <div className="space-y-1 text-sm text-muted-foreground">
+                    <p>{session.dateTime}</p>
+                    <p>Facilitator: {session.therapistName}</p>
+                  </div>
+                </div>
+                <Button className="gap-2 rounded-2xl" onClick={() => router.push(`/call/${session.id}`)}>
+                  <Calendar className="w-4 h-4" />
+                  Join Call
+                </Button>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-border/70 bg-muted/30 p-4">
+                <p className="text-sm font-medium text-foreground mb-2">What would you like to talk about today?</p>
+                <Textarea
+                  value={sessionPrompts[session.id] || ""}
+                  onChange={(event) => setSessionPrompts((prev) => ({ ...prev, [session.id]: event.target.value }))}
+                  placeholder={session.promptPlaceholder}
+                  className="min-h-[96px] rounded-2xl bg-background/70"
                 />
-                <button
-                  onClick={handleSend}
-                  disabled={!typedMessage.trim()}
-                  className="w-9 h-9 rounded-full bg-primary flex items-center justify-center disabled:opacity-40 shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5 text-primary-foreground" />
-                </button>
               </div>
-              {isRecording && (
-                <p className="text-xs text-red-500 mt-2 text-center animate-pulse">
-                  Recording for transcription with Deepgram — tap again to stop
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="w-80 border-l border-border/50 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Therapist workspace</p>
-
-          <Card className="bg-primary/5 border-primary/20">
-            <CardContent className="p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <ClipboardList className="w-3.5 h-3.5 text-primary" />
-                <span className="text-xs font-medium text-primary">AI copilot active</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                AI is assisting with note-taking, moderation, participation balance, and post-session recap drafting for therapist review.
-              </p>
             </CardContent>
           </Card>
+        ))}
+      </div>
+    );
+  };
 
-          <Card>
-            <CardContent className="p-3 space-y-2">
-              <p className="text-xs font-medium text-foreground">Participation balance</p>
-              <p className="text-xs text-muted-foreground">
-                {participationSnapshot.quietParticipants.length > 0
-                  ? `Quieter voices: ${participationSnapshot.quietParticipants.join(", ")}`
-                  : "Everyone has contributed at least once."}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {participationSnapshot.dominantSpeaker
-                  ? `Most active speaker: ${participationSnapshot.dominantSpeaker}`
-                  : "No dominant speaker pattern detected yet."}
-              </p>
-            </CardContent>
-          </Card>
-
-          <div className="space-y-2">
-            {phase === "waiting" && (
-              <Button variant="outline" size="sm" className="w-full gap-2 justify-start" onClick={startCheckin}>
-                <Sparkles className="w-3.5 h-3.5" />
-                Start Weekly Session
+  const renderHistory = () => (
+    <div className="space-y-4">
+      {DEMO_HISTORY.map((item) => (
+        <Card key={item.id} className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+          <CardContent className="p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <Badge variant="secondary" className="mb-3 text-xs">{item.sessionDate}</Badge>
+                <h3 className="text-2xl font-bold text-foreground mb-1">{item.groupName}</h3>
+                <p className="text-sm text-muted-foreground">Emotional tone: {item.emotionalTone}</p>
+              </div>
+              <Button variant="outline" className="gap-2 rounded-2xl" onClick={() => router.push("/summary")}>
+                Open Full Recap
+                <ArrowRight className="w-4 h-4" />
               </Button>
-            )}
+            </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full gap-2 justify-start"
-              onClick={triggerCopilot}
-              disabled={copilotLoading || phase !== "live"}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-primary" />
-              {copilotLoading ? "Generating guidance..." : "Generate facilitator guidance"}
-            </Button>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <InfoBlock title="Main topics discussed" value={item.mainTopics.join(", ")} />
+              <InfoBlock title="Key takeaways" value={item.keyTakeaways} />
+              <InfoBlock title="Personal reflection" value={item.personalReflection} className="md:col-span-2" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full gap-2 justify-start text-red-600 border-red-200 hover:bg-red-50"
-              onClick={triggerSafetyAlert}
-              disabled={phase !== "live"}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              Simulate moderation flag
-            </Button>
+  const renderInsights = () => (
+    <div className="space-y-5">
+      <Card className="rounded-3xl border border-primary/20 bg-[linear-gradient(135deg,_rgba(167,132,94,0.14),_rgba(255,255,255,0.94))] shadow-[0_20px_70px_-35px_rgba(90,67,45,0.32)]">
+        <CardContent className="p-6 md:p-7">
+          <Badge variant="secondary" className="mb-3 text-xs">Main differentiator</Badge>
+          <h2 className="text-3xl font-bold text-foreground mb-3">{DEMO_INSIGHTS.headline}</h2>
+          <p className="text-muted-foreground max-w-2xl">
+            This screen turns session summaries, participation, and journaling into a longer-term view that helps both the member and therapist notice change over time.
+          </p>
+        </CardContent>
+      </Card>
 
-            <Button variant="outline" size="sm" className="w-full gap-2 justify-start" onClick={endSession}>
-              <LogOut className="w-3.5 h-3.5" />
-              End session and queue therapist review
-            </Button>
-          </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <h3 className="text-lg font-semibold text-foreground">Recurring themes</h3>
+            </div>
+            <div className="space-y-3">
+              {DEMO_INSIGHTS.recurringThemes.map((theme) => (
+                <p key={theme} className="text-sm text-muted-foreground leading-relaxed">{theme}</p>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
-          {copilotSuggestion && (
-            <Card className="border-primary/20 bg-primary/5">
-              <CardContent className="p-3 space-y-3">
-                <div>
-                  <p className="text-xs font-medium text-primary mb-1">Suggested facilitator move</p>
-                  <p className="text-sm text-foreground leading-relaxed">{copilotSuggestion.prompt}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-foreground mb-1">Why now</p>
-                  <p className="text-xs text-muted-foreground">{copilotSuggestion.rationale}</p>
-                </div>
-                <Button size="sm" className="w-full" onClick={useCopilotSuggestion}>
-                  Therapist uses this prompt
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          {safetyRecommendation && (
-            <Card className="bg-red-50 border-red-200">
-              <CardContent className="p-3 space-y-3">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-3.5 h-3.5 text-red-600" />
-                  <span className="text-xs font-medium text-red-700">
-                    Moderation recommendation: {safetyRecommendation.riskLevel} attention
-                  </span>
-                </div>
-                <p className="text-sm text-red-900 leading-relaxed">{safetyRecommendation.response}</p>
-                {safetyRecommendation.resources.length > 0 && (
-                  <p className="text-xs text-red-700">
-                    Resources ready: {safetyRecommendation.resources.join(", ")}
-                  </p>
-                )}
-                <Button size="sm" variant="outline" className="w-full border-red-200" onClick={useSafetyResponse}>
-                  Therapist shares grounding response
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-
-          <Separator />
-
-          <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">Reaction shortcuts</p>
-            <div className="space-y-1">
-              {REACTIONS.map((reaction) => (
-                <div key={reaction} className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
-                  <span className="text-xs text-muted-foreground">{reaction}</span>
+        <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <LineChart className="w-4 h-4 text-primary" />
+              <h3 className="text-lg font-semibold text-foreground">Emotional trends over time</h3>
+            </div>
+            <div className="space-y-3">
+              {DEMO_INSIGHTS.emotionalTrends.map((trend) => (
+                <div key={trend.label} className="rounded-2xl bg-muted/35 p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{trend.label}</p>
+                  <p className="text-sm text-foreground mt-1">{trend.value}</p>
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Users className="w-4 h-4 text-primary" />
+              <h3 className="text-lg font-semibold text-foreground">Participation changes</h3>
+            </div>
+            <div className="space-y-3">
+              {DEMO_INSIGHTS.participationChanges.map((item) => (
+                <p key={item} className="text-sm text-muted-foreground leading-relaxed">{item}</p>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Bot className="w-4 h-4 text-primary" />
+              <h3 className="text-lg font-semibold text-foreground">Behavioral shifts</h3>
+            </div>
+            <div className="space-y-3">
+              {DEMO_INSIGHTS.behavioralShifts.map((item) => (
+                <p key={item} className="text-sm text-muted-foreground leading-relaxed">{item}</p>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+
+  const renderJournal = () => (
+    <div className="space-y-5">
+      <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+        <CardContent className="p-6 md:p-7">
+          <div className="flex items-center gap-2 mb-3">
+            <Lock className="w-4 h-4 text-primary" />
+            <Badge variant="secondary" className="text-xs">Private to you</Badge>
+          </div>
+          <h2 className="text-3xl font-bold text-foreground mb-2">Journal between sessions</h2>
+          <p className="text-muted-foreground max-w-2xl">
+            Capture quick thoughts, build prep for the next session, and ask the AI for a light reflection that supports the therapist rather than replacing them.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+        <CardContent className="p-6">
+          <p className="text-sm font-medium text-foreground mb-3">Quick thought entry</p>
+          <Textarea
+            value={journalEntry}
+            onChange={(event) => setJournalEntry(event.target.value)}
+            placeholder="Write what has been sitting with you between sessions..."
+            className="min-h-[180px] rounded-2xl bg-background/70"
+          />
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {DEMO_JOURNAL_PROMPTS.map((prompt) => (
+              <button
+                key={prompt}
+                onClick={() => setJournalEntry((current) => current ? `${current}\n\n${prompt}` : prompt)}
+                className="rounded-full border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:border-primary/40"
+              >
+                {prompt}
+              </button>
+            ))}
           </div>
 
-          <Card className="bg-muted/40">
-            <CardContent className="p-3">
-              <p className="text-xs font-medium text-foreground mb-1">Release workflow</p>
-              <p className="text-xs text-muted-foreground">
-                AI drafts therapist notes and member recaps after the session. Member-facing summaries stay locked until the therapist reviews them.
-              </p>
-            </CardContent>
-          </Card>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button className="gap-2 rounded-2xl" onClick={generateAiReflection}>
+              <Sparkles className="w-4 h-4" />
+              AI reflection
+            </Button>
+            <Button variant="outline" className="gap-2 rounded-2xl" onClick={saveJournal}>
+              {journalSaved ? <Check className="w-4 h-4" /> : <NotebookPen className="w-4 h-4" />}
+              Save for next session prep
+            </Button>
+          </div>
+
+          {aiReflection && (
+            <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-primary mb-2">AI reflection</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">{aiReflection}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  const renderProfile = () => (
+    <div className="grid gap-4 md:grid-cols-2">
+      <SettingsCard title="Role" value={onboardingProfile.rolePreference} />
+      <SettingsCard title="Life challenge" value={onboardingProfile.lifeChallenge} />
+      <SettingsCard title="Communication preference" value={onboardingProfile.communicationStyle.join(", ")} />
+      <SettingsCard title="Preferred group size" value={onboardingProfile.preferredGroupSize} />
+      <SettingsCard title="Privacy / anonymity" value={onboardingProfile.privacyPreference} />
+      <SettingsCard title="Support preference" value={onboardingProfile.supportPreferences.join(", ")} />
+
+      <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)] md:col-span-2">
+        <CardContent className="p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Settings2 className="w-4 h-4 text-primary" />
+            <h3 className="text-lg font-semibold text-foreground">Topics and notifications</h3>
+          </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {onboardingProfile.topics.map((topic) => (
+              <Badge key={topic} variant="secondary" className="text-sm">{topic}</Badge>
+            ))}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {DEMO_PROFILE.notifications.map((item) => (
+              <div key={item} className="rounded-2xl border border-border/70 bg-muted/35 p-4">
+                <p className="text-sm font-medium text-foreground">{item}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(193,158,124,0.16),_transparent_34%),linear-gradient(to_bottom,_rgba(255,252,247,1),_rgba(246,241,236,1))]">
+      <div className="mx-auto max-w-6xl px-4 pb-28 pt-6 md:px-6 md:pt-8">
+        <Card className="rounded-[2rem] border border-border/70 bg-white/85 shadow-[0_24px_90px_-45px_rgba(90,67,45,0.32)] backdrop-blur">
+          <CardContent className="p-5 md:p-7">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-9 h-9 rounded-2xl bg-primary/10 flex items-center justify-center">
+                    <Heart className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Resonance</p>
+                    <p className="text-xs text-muted-foreground">Therapist-led group support with AI assistance</p>
+                  </div>
+                </div>
+                <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-2">{selectedPod.name}</h1>
+                <p className="text-muted-foreground max-w-2xl">{selectedPod.description}</p>
+              </div>
+              <div className="rounded-3xl border border-primary/15 bg-primary/5 px-4 py-3 max-w-sm">
+                <div className="flex items-center gap-2 mb-1">
+                  <Bot className="w-4 h-4 text-primary" />
+                  <p className="text-sm font-medium text-foreground">AI supports the therapist and member</p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  AI summarizes sessions, surfaces patterns, and helps prep recaps and insights. It does not replace therapy.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {selectedPod.sharedThemes.map((theme) => (
+                <Badge key={theme} variant="secondary" className="text-sm capitalize">{theme}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="mt-6">
+          {selectedTab === "groups" && renderGroups()}
+          {selectedTab === "upcoming" && renderUpcoming()}
+          {selectedTab === "history" && renderHistory()}
+          {selectedTab === "insights" && renderInsights()}
+          {selectedTab === "journal" && renderJournal()}
+          {selectedTab === "profile" && renderProfile()}
+        </div>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 px-3 pb-3">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-1 rounded-[2rem] border border-border/70 bg-white/90 p-2 shadow-[0_20px_60px_-30px_rgba(90,67,45,0.35)] backdrop-blur">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = selectedTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setSelectedTab(item.id)}
+                className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-[1.4rem] px-2 py-2.5 text-xs transition-all ${
+                  active
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                <span className="truncate">{item.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 }
 
-function MessageBubble({ message, onReact }: { message: Message; onReact: (id: string, reaction: string) => void }) {
-  const [hovering, setHovering] = useState(false);
-  const isYou = message.participantId === "you";
-  const isTherapist = message.role === "therapist";
-
+function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div
-      className={`fade-in-up ${isYou ? "flex flex-row-reverse" : "flex"} items-start gap-2.5`}
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
-    >
-      {!isYou && (
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${
-          isTherapist
-            ? "bg-slate-200 text-slate-800"
-            : PARTICIPANT_COLORS[message.participantId] || "bg-muted text-muted-foreground"
-        }`}>
-          {isTherapist ? DEMO_THERAPIST.initial : message.participantName[0]}
-        </div>
-      )}
-
-      <div className={`max-w-[70%] flex flex-col gap-1 ${isYou ? "items-end" : "items-start"}`}>
-        {!isYou && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-foreground">{message.participantName}</span>
-            {isTherapist && <Badge variant="secondary" className="text-xs px-1.5 py-0">Therapist</Badge>}
-            <span className="text-xs text-muted-foreground">{message.timestamp}</span>
-          </div>
-        )}
-
-        <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-          isYou
-            ? "bg-primary text-primary-foreground rounded-tr-sm"
-            : isTherapist
-            ? "bg-slate-100 text-slate-900 border border-slate-200 rounded-tl-sm"
-            : "bg-card text-foreground border border-border rounded-tl-sm"
-        }`}>
-          {message.text}
-        </div>
-
-        {Object.keys(message.reactions).length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(message.reactions).map(([reaction, count]) => (
-              <button
-                key={reaction}
-                onClick={() => onReact(message.id, reaction)}
-                className="text-xs bg-muted/60 border border-border rounded-full px-2 py-0.5 hover:bg-muted transition-colors"
-              >
-                {reaction} {count}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {hovering && !isYou && !isTherapist && (
-          <div className="flex gap-1 flex-wrap mt-0.5">
-            {REACTIONS.map((reaction) => (
-              <button
-                key={reaction}
-                onClick={() => onReact(message.id, reaction)}
-                className="text-xs bg-card border border-border rounded-full px-2 py-0.5 hover:bg-muted transition-colors text-muted-foreground"
-              >
-                {reaction}
-              </button>
-            ))}
-          </div>
-        )}
+    <div className="rounded-2xl bg-muted/35 p-3">
+      <div className="flex items-center gap-1.5 text-muted-foreground mb-1">
+        {icon}
+        <span className="text-xs">{label}</span>
       </div>
+      <p className="text-sm font-medium text-foreground leading-snug">{value}</p>
     </div>
   );
 }
 
-function TypingIndicator({ participantId, name, initial }: { participantId: string; name: string; initial: string }) {
+function InfoBlock({ title, value, className = "" }: { title: string; value: string; className?: string }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${PARTICIPANT_COLORS[participantId] || "bg-muted text-muted-foreground"}`}>
-        {initial}
-      </div>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs text-muted-foreground">{name}</span>
-        <div className="bg-card border border-border rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
-          {[0, 1, 2].map((index) => (
-            <div
-              key={index}
-              className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
-              style={{ animationDelay: `${index * 150}ms` }}
-            />
-          ))}
-        </div>
-      </div>
+    <div className={`rounded-2xl border border-border/70 bg-muted/30 p-4 ${className}`}>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">{title}</p>
+      <p className="text-sm text-muted-foreground leading-relaxed">{value}</p>
     </div>
+  );
+}
+
+function SettingsCard({ title, value }: { title: string; value: string }) {
+  return (
+    <Card className="rounded-3xl border border-border/70 bg-white/90 shadow-[0_18px_60px_-35px_rgba(90,67,45,0.24)]">
+      <CardContent className="p-6">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">{title}</p>
+        <p className="text-sm text-foreground">{value}</p>
+      </CardContent>
+    </Card>
   );
 }

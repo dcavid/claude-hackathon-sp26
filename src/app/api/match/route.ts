@@ -23,7 +23,16 @@ type MatchResponse = {
 
 export async function POST(request: NextRequest) {
   try {
-    const { transcript, topics, preferences } = await request.json();
+    const {
+      transcript,
+      lifeChallenge,
+      topics,
+      preferences,
+      privacyPreference,
+      preferredGroupSize,
+      rolePreference,
+      communicationStyle,
+    } = await request.json();
 
     const apiKey = process.env.GEMINI_API_KEY;
 
@@ -37,8 +46,13 @@ export async function POST(request: NextRequest) {
     const prompt = `Analyze this peer support onboarding reflection for a therapist-led support pod demo.
 
 Reflection transcript: "${transcript || ""}"
+Primary life challenge: ${lifeChallenge || ""}
 Selected topics: ${JSON.stringify(topics || [])}
 Support preferences: ${JSON.stringify(preferences || [])}
+Privacy preference: ${privacyPreference || ""}
+Preferred group size: ${preferredGroupSize || ""}
+Role preference: ${rolePreference || ""}
+Communication style: ${JSON.stringify(communicationStyle || [])}
 
 Return JSON:
 {

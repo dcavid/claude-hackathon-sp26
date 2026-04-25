@@ -1,9 +1,20 @@
 // Text-to-speech for spoken facilitator interventions.
 // Uses the server-side Deepgram route when available, falls back to Web Speech.
 
+let speechQueue: Promise<void> = Promise.resolve();
+
 export async function speak(text: string, voice?: string): Promise<void> {
-  const played = await speakWithDeepgram(text, voice);
-  if (!played) speakWithWebSpeech(text);
+  speechQueue = speechQueue
+    .catch(() => {})
+    .then(async () => {
+      const played = await speakWithDeepgram(text, voice);
+      if (!played) {
+        await speakWithWebSpeech(text);
+      }
+      await wait(350);
+    });
+
+  return speechQueue;
 }
 
 async function speakWithDeepgram(text: string, voice?: string): Promise<boolean> {
@@ -18,22 +29,37 @@ async function speakWithDeepgram(text: string, voice?: string): Promise<boolean>
   const audioBlob = await res.blob();
   const url = URL.createObjectURL(audioBlob);
   const audio = new Audio(url);
-  await audio.play().catch(() => {
-    URL.revokeObjectURL(url);
+  await audio.play();
+  await new Promise<void>((resolve, reject) => {
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      resolve();
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Audio playback failed"));
+    };
+  }).catch(() => {
     throw new Error("Audio playback failed");
   });
-  audio.onended = () => URL.revokeObjectURL(url);
   return true;
 }
 
-function speakWithWebSpeech(text: string): void {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
+function speakWithWebSpeech(text: string): Promise<void> {
+  if (typeof window === "undefined" || !window.speechSynthesis) return Promise.resolve();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 0.9;
   utterance.pitch = 1.0;
   const voices = window.speechSynthesis.getVoices();
   const preferred = voices.find((v) => v.name.includes("Samantha") || v.name.includes("Karen") || v.lang === "en-US");
   if (preferred) utterance.voice = preferred;
-  window.speechSynthesis.speak(utterance);
+  return new Promise((resolve, reject) => {
+    utterance.onend = () => resolve();
+    utterance.onerror = () => reject(new Error("Speech synthesis failed"));
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
